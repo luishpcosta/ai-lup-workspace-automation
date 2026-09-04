@@ -27,3 +27,6 @@ backend/run-many-state/
 # Ad-hoc session logs from manual `workflow run`/`run-many` invocations during
 # development (redirected stdout) — not source, not curated evidence.
 /backend/run-*.log
+
+# Logs de ./start-local.sh (backend/frontend rodando localmente).
+/.local-logs/
