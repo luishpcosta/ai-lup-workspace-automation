@@ -13,27 +13,34 @@ export default function SettingsScreen({ initial, onSaved }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} aria-label="Configuração">
-      <h1>Configuração</h1>
-      <label htmlFor="baseUrl">URL base do backend</label>
-      <input
-        id="baseUrl"
-        type="text"
-        placeholder="http://localhost:8000"
-        value={baseUrl}
-        onChange={(event) => setBaseUrl(event.target.value)}
-        required
-      />
-      <label htmlFor="configDir">Diretório-base de configs</label>
-      <input
-        id="configDir"
-        type="text"
-        placeholder="/caminho/para/chains"
-        value={configDir}
-        onChange={(event) => setConfigDir(event.target.value)}
-        required
-      />
-      <button type="submit">Salvar</button>
-    </form>
+    <div className="settings-screen">
+      <form onSubmit={handleSubmit} aria-label="Configuração" className="panel">
+        <h1>Configuração</h1>
+        <p className="settings-hint">
+          Informe onde o motor de workflow está rodando antes de continuar.
+        </p>
+        <label htmlFor="baseUrl">URL base do backend</label>
+        <input
+          id="baseUrl"
+          type="text"
+          placeholder="http://localhost:8000"
+          value={baseUrl}
+          onChange={(event) => setBaseUrl(event.target.value)}
+          required
+        />
+        <label htmlFor="configDir">Diretório-base de configs</label>
+        <input
+          id="configDir"
+          type="text"
+          placeholder="/caminho/para/chains"
+          value={configDir}
+          onChange={(event) => setConfigDir(event.target.value)}
+          required
+        />
+        <button type="submit" className="btn-primary">
+          Salvar
+        </button>
+      </form>
+    </div>
   )
 }

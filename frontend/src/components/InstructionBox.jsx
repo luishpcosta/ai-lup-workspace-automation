@@ -22,7 +22,7 @@ export default function InstructionBox({ chainName }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} aria-label="Enviar instrução">
+    <form onSubmit={handleSubmit} aria-label="Enviar instrução" className="panel">
       <label htmlFor="mensagem">Instrução</label>
       <input
         id="mensagem"
@@ -31,7 +31,9 @@ export default function InstructionBox({ chainName }) {
         onChange={(event) => setMensagem(event.target.value)}
         required
       />
-      <button type="submit">Enviar</button>
+      <button type="submit" className="btn-primary">
+        Enviar
+      </button>
       {status === 'sent' && <p>Instrução enviada.</p>}
       {status === 'error' && <p role="alert">{errorMessage}</p>}
     </form>

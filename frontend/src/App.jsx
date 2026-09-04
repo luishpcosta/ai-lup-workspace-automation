@@ -29,7 +29,7 @@ export default function App() {
     <main>
       <header>
         <h1>Painel de Controle — Motor de Workflow</h1>
-        <button type="button" onClick={() => setReconfiguring(true)}>
+        <button type="button" className="btn-secondary" onClick={() => setReconfiguring(true)}>
           Configurações
         </button>
       </header>

@@ -45,7 +45,7 @@ export default function RunDetail({ chainName, onBack }) {
 
   return (
     <section aria-label={`Detalhe de ${chainName}`}>
-      <button type="button" onClick={onBack}>
+      <button type="button" className="btn-secondary" onClick={onBack}>
         ← Voltar
       </button>
       <h2>{chainName}</h2>
@@ -55,28 +55,30 @@ export default function RunDetail({ chainName, onBack }) {
       {detail && (
         <>
           <p>Status geral: {detail.status}</p>
-          <table aria-label="Etapas">
-            <thead>
-              <tr>
-                <th>etapa</th>
-                <th>status</th>
-                <th>tentativas</th>
-                <th>erro</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.steps.map((step) => (
-                <tr key={step.step_name}>
-                  <td>{step.step_name}</td>
-                  <td>{step.status}</td>
-                  <td>{step.attempt_count}</td>
-                  <td>{step.error_message ?? '—'}</td>
+          <div className="panel">
+            <table aria-label="Etapas">
+              <thead>
+                <tr>
+                  <th>etapa</th>
+                  <th>status</th>
+                  <th>tentativas</th>
+                  <th>erro</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {detail.steps.map((step) => (
+                  <tr key={step.step_name}>
+                    <td>{step.step_name}</td>
+                    <td>{step.status}</td>
+                    <td>{step.attempt_count}</td>
+                    <td>{step.error_message ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-          <button type="button" onClick={handleCancel}>
+          <button type="button" className="btn-warn" onClick={handleCancel}>
             Cancelar
           </button>
           {cancelMessage && <p>{cancelMessage}</p>}

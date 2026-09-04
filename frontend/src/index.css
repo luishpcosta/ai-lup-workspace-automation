@@ -1,17 +1,68 @@
 :root {
-  color-scheme: light dark;
-  font: 16px/1.5 system-ui, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: light;
+
+  /* Tokens — Minimal Clean, bordô + laranja sobre branco */
+  --bg: #ffffff;
+  --bg-subtle: #faf8f7;
+  --text: #1c1417;
+  --text-muted: #766e72;
+  --border: #e7e1e0;
+  --border-strong: #d4cbc9;
+
+  --accent: #7c2b45; /* bordô — ações, foco, marca */
+  --accent-hover: #631f37;
+  --accent-soft: rgba(124, 43, 69, 0.08);
+  --accent-contrast: #ffffff;
+
+  --warn: #d9631e; /* laranja — falha/atenção, único sinal de status */
+  --warn-soft: rgba(217, 99, 30, 0.12);
+  --warn-strong: #b74f16;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --shadow-sm:
+    0 1px 2px rgba(28, 20, 23, 0.06),
+    0 1px 1px rgba(28, 20, 23, 0.04);
+  --shadow-md:
+    0 4px 12px rgba(28, 20, 23, 0.08),
+    0 1px 2px rgba(28, 20, 23, 0.06);
+
+  font: 15px/1.55 system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  background: var(--bg-subtle);
+  color: var(--text);
 }
 
 #root {
   max-width: 960px;
   margin: 0 auto;
-  padding: 16px 24px 48px;
-  box-sizing: border-box;
+  padding: 24px 24px 64px;
+}
+
+.settings-screen {
+  display: flex;
+  justify-content: center;
+  padding-top: 64px;
+}
+
+.settings-screen .panel {
+  width: 100%;
+  max-width: 380px;
+}
+
+.settings-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-top: -4px;
 }
 
 header {
@@ -19,52 +70,208 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  margin-bottom: 24px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 4px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 h1 {
-  font-size: 22px;
+  font-size: 20px;
+}
+
+h2 {
+  font-size: 18px;
+  letter-spacing: -0.015em;
+}
+
+h3 {
+  font-size: 15px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+p {
+  margin: 0 0 8px;
+}
+
+/* Painéis (cards): tabela, formulário de disparo, stream — elevação por sombra
+   suave em vez de borda grossa colorida. */
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  margin: 0 0 20px;
 }
 
 form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 16px 0;
+  gap: 10px;
   max-width: 480px;
+}
+
+label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+input[type='text'],
+textarea {
+  font: inherit;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+}
+
+input[type='text']:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out;
+  align-self: flex-start;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Botão primário: bordô — a única ação de destaque por tela. */
+.btn-primary,
+button[type='submit'] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.btn-primary:hover:not(:disabled),
+button[type='submit']:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* Botão secundário: neutro, para navegação/atualização. */
+.btn-secondary {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--text-muted);
+}
+
+/* Cancelar: ação consequente, contorno em laranja — não some no meio dos
+   botões neutros, mas também não compete com o bordô de ação primária. */
+.btn-warn {
+  background: var(--bg);
+  color: var(--warn-strong);
+  border-color: var(--warn);
+}
+
+.btn-warn:hover:not(:disabled) {
+  background: var(--warn-soft);
 }
 
 table {
   border-collapse: collapse;
   width: 100%;
-  margin: 16px 0;
+  font-variant-numeric: tabular-nums;
 }
 
 th,
 td {
   text-align: left;
-  padding: 6px 10px;
-  border-bottom: 1px solid #8884;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
 }
 
-tbody tr {
+th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+tr.row-clickable {
   cursor: pointer;
 }
 
+tr.row-clickable:hover {
+  background: var(--bg-subtle);
+}
+
+tr.run-row-failed.row-clickable:hover {
+  background: var(--warn-soft);
+  filter: brightness(0.97);
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+/* Único sinal de status: laranja, discreto (tinta de fundo, não borda grossa). */
 tr.run-row-failed {
-  background: rgba(220, 38, 38, 0.12);
-  color: #dc2626;
+  background: var(--warn-soft);
+  color: var(--warn-strong);
   font-weight: 600;
 }
 
 pre {
-  background: #8881;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   padding: 12px;
   max-height: 320px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  font-size: 13px;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 [role='alert'] {
-  color: #dc2626;
+  color: var(--warn-strong);
+  font-weight: 600;
+}
+
+p[role='alert'] {
+  background: var(--warn-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin: 4px 0;
 }

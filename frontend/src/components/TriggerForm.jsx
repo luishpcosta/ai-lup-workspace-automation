@@ -43,29 +43,32 @@ export default function TriggerForm({ onDispatched }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} aria-label="Disparar execuções">
-      <label htmlFor="ids">IDs de documento de referência (um por linha)</label>
-      <textarea
-        id="ids"
-        value={raw}
-        onChange={(event) => setRaw(event.target.value)}
-        rows={4}
-      />
-      <button type="submit" disabled={submitting}>
-        Disparar
-      </button>
-      {results.length > 0 && (
-        <ul aria-label="Resultado do disparo">
-          {results.map((result) => (
-            <li key={result.id}>
-              {result.id}:{' '}
-              {result.status === 'pending' && 'disparando…'}
-              {result.status === 'success' && `iniciado (${result.chainName})`}
-              {result.status === 'error' && <span role="alert">{result.message}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </form>
+    <section>
+      <h2>Disparar execuções</h2>
+      <form onSubmit={handleSubmit} aria-label="Disparar execuções" className="panel">
+        <label htmlFor="ids">IDs de documento de referência (um por linha)</label>
+        <textarea
+          id="ids"
+          value={raw}
+          onChange={(event) => setRaw(event.target.value)}
+          rows={4}
+        />
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          Disparar
+        </button>
+        {results.length > 0 && (
+          <ul aria-label="Resultado do disparo">
+            {results.map((result) => (
+              <li key={result.id}>
+                {result.id}:{' '}
+                {result.status === 'pending' && 'disparando…'}
+                {result.status === 'success' && `iniciado (${result.chainName})`}
+                {result.status === 'error' && <span role="alert">{result.message}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </form>
+    </section>
   )
 }
