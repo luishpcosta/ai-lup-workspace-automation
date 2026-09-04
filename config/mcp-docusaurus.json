@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ai-lup-docs": {
+      "type": "http",
+      "url": "http://localhost:3456"
+    }
+  }
+}

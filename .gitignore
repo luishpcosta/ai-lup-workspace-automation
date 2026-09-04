@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+*.db
+.venv/
+venv/
+
+# samples/ (real Docusaurus site + real target CLI repo used for end-to-end testing)
+samples/docs-site/node_modules/
+samples/docs-site/build/
+samples/docs-site/.docusaurus/
+samples/docs-site/mcp-server.log
+
+# samples/target-cli is its own git repo, already pushed independently to
+# github.com/luishpcosta/ai-lup-poc-target-cli — not tracked as regular files here.
+samples/target-cli/
+
+# Real clones the plugins create at runtime (workspace_setup) — always regenerable
+# from repo_url + historia_id, never source.
+workspaces/
+
+# Per-run/per-batch SQLite state stores (ADR-001/ADR-003) — generated at runtime.
+run-many-state/
+
+# Ad-hoc session logs from manual `workflow run`/`run-many` invocations during
+# development (redirected stdout) — not source, not curated evidence.
+/run-*.log

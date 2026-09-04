@@ -1,0 +1,2 @@
+﻿run_id,workflow_name,config_path,status,created_at,updated_at
+abddb3a1-1392-4acb-81e1-2cf058bf6618,hist-004-list-json,samples/hist-004-list-json.yaml,completed,2026-09-04T02:26:53.501868+00:00,2026-09-04T02:37:58.880599+00:00

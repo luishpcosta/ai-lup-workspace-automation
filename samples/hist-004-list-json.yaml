@@ -1,0 +1,79 @@
+# Cadeia real (não exemplo ilustrativo) para HIST-004 (`list --json`), rodando contra
+# um repositório GitHub real (https://github.com/luishpcosta/ai-lup-poc-target-cli,
+# privado, criado nesta sessão via `gh repo create` — throwaway, só para este teste) e
+# o servidor MCP real de samples/docs-site.
+#
+# Pré-requisito antes de rodar `workflow run samples/hist-004-list-json.yaml`:
+#   cd samples/docs-site && npm run build && node scripts/mcp-server.mjs &
+#   (deixa o servidor MCP no ar em http://localhost:3456)
+
+name: hist-004-list-json
+
+vars:
+  historia_id: "HIST-004"
+  branch_name: "feature/HIST-004-list-json"
+
+steps:
+  - name: preparar_ambiente
+    plugin: workspace_setup
+    usa_output_anterior: false
+    params:
+      repo_url: "https://github.com/luishpcosta/ai-lup-poc-target-cli.git"
+      branch_base: "main"
+      branch_name: "{{ vars.branch_name }}"
+      historia_id: "{{ vars.historia_id }}"
+      install_cmd: "npm install"
+    retry:
+      max_attempts: 2
+      initial_delay: 5.0
+      multiplier: 2.0
+
+  - name: implementar_historia
+    plugin: claude_code_runner
+    usa_output_anterior: true
+    params:
+      modo: "coding"
+      mcp_config_path: "C:/Users/luish/developer/ai-tools/ai-lup-workspace-automation/config/mcp-docusaurus.json"
+      historia_id: "{{ vars.historia_id }}"
+    retry:
+      max_attempts: 1
+
+  - name: abrir_pr
+    plugin: git_pr
+    usa_output_anterior: true
+    params:
+      action: "create_pr"
+      branch: "{{ vars.branch_name }}"
+      base_branch: "main"
+      historia_id: "{{ vars.historia_id }}"
+      title_template: "[{{ vars.historia_id }}] list --json"
+      body_template: |
+        Implementa {{ vars.historia_id }}.
+
+        Docs consultados durante a implementação:
+        {{ docs_referenced }}
+      labels: ["automated-pr"]
+    retry:
+      max_attempts: 1
+
+  - name: aguardar_checks
+    plugin: shell_script_runner
+    usa_output_anterior: true
+    params:
+      script_path: "./scripts/poll_ci_checks.sh"
+      interpreter: "bash"
+      timeout_seconds: 300
+    retry:
+      max_attempts: 3
+      initial_delay: 30.0
+      multiplier: 1.0
+
+  - name: revisar_pr
+    plugin: claude_code_runner
+    usa_output_anterior: true
+    params:
+      modo: "review"
+      mcp_config_path: "C:/Users/luish/developer/ai-tools/ai-lup-workspace-automation/config/mcp-docusaurus.json"
+      skill: "code-review"
+    retry:
+      max_attempts: 1

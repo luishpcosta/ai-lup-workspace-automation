@@ -1,0 +1,84 @@
+# Exemplo de cadeia completa da feature 002 (ADR-002). Substitua os valores de
+# `vars:` e `repo_url` pelos reais antes de rodar:
+#
+#   workflow run examples/implementar-historia-sdd.yaml
+#
+# Requer no ambiente: git, docker (se docker_compose_path for usado), gh CLI
+# autenticado, claude CLI autenticado, e um servidor MCP configurado no
+# arquivo apontado por mcp_config_path (não incluso aqui).
+
+name: implementar-historia-sdd
+
+vars:
+  historia_id: "HIST-142"
+  branch_name: "feature/HIST-142"
+
+steps:
+  - name: preparar_ambiente
+    plugin: workspace_setup
+    usa_output_anterior: false
+    params:
+      repo_url: "git@github.com:org/app-alvo.git"
+      branch_base: "main"
+      branch_name: "{{ vars.branch_name }}"
+      historia_id: "{{ vars.historia_id }}"
+      install_cmd: "npm install"
+      # docker_compose_path: "./docker/local-deps.compose.yaml"  # opcional
+    retry:
+      max_attempts: 3
+      initial_delay: 10.0
+      multiplier: 2.0
+
+  - name: implementar_historia
+    plugin: claude_code_runner
+    usa_output_anterior: true
+    params:
+      modo: "coding"
+      mcp_config_path: "./config/mcp-docusaurus.json"
+      historia_id: "{{ vars.historia_id }}"
+    retry:
+      max_attempts: 2
+      initial_delay: 30.0
+      multiplier: 2.0
+
+  - name: abrir_pr
+    plugin: git_pr
+    usa_output_anterior: true
+    params:
+      action: "create_pr"
+      branch: "{{ vars.branch_name }}"
+      base_branch: "main"
+      historia_id: "{{ vars.historia_id }}"
+      title_template: "[{{ vars.historia_id }}] {{ summary }}"
+      body_template: |
+        Implementa {{ vars.historia_id }}.
+
+        Docs consultados durante a implementação:
+        {{ docs_referenced }}
+      labels: ["automated-pr"]
+    retry:
+      max_attempts: 3
+      initial_delay: 15.0
+      multiplier: 2.0
+
+  - name: aguardar_checks
+    plugin: shell_script_runner
+    usa_output_anterior: true
+    params:
+      script_path: "./scripts/poll_ci_checks.sh"
+      interpreter: "bash"
+      timeout_seconds: 600
+    retry:
+      max_attempts: 5
+      initial_delay: 60.0
+      multiplier: 1.0
+
+  - name: revisar_pr
+    plugin: claude_code_runner
+    usa_output_anterior: true
+    params:
+      modo: "review"
+      mcp_config_path: "./config/mcp-docusaurus.json"
+      skill: "code-review"
+    retry:
+      max_attempts: 1

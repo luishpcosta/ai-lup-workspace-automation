@@ -1,0 +1,42 @@
+[project]
+name = "workflow-engine"
+version = "0.1.0"
+description = "Local workflow engine that orchestrates a configurable chain of steps via Python plugins (e.g. calling Claude Code or other tools)."
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+workflow = "workflow_engine.adapters.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# plugins/*.py are standalone modules (ADR-001 discovery convention, no package),
+# loaded the same way FileSystemPluginRegistry loads them — added here only so
+# tests can `import <plugin_module>` directly.
+pythonpath = ["plugins"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["workflow_engine"]

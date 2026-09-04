@@ -1,0 +1,34 @@
+# Cadeia real (curta: 2 etapas) para HIST-006 — roda em paralelo com
+# hist-005-version-flag.yaml (arquivo diferente, branch diferente, mesmo repo real:
+# ai-lup-poc-target-cli). Teste real de execuções paralelas independentes (ADR-003).
+
+name: hist-006-remove-validation
+
+vars:
+  historia_id: "HIST-006"
+  branch_name: "feature/HIST-006-remove-validation"
+
+steps:
+  - name: preparar_ambiente
+    plugin: workspace_setup
+    usa_output_anterior: false
+    params:
+      repo_url: "C:/Users/luish/developer/ai-tools/ai-lup-workspace-automation/samples/target-cli"
+      branch_base: "main"
+      branch_name: "{{ vars.branch_name }}"
+      historia_id: "{{ vars.historia_id }}"
+      install_cmd: "npm install"
+    retry:
+      max_attempts: 2
+      initial_delay: 5.0
+      multiplier: 2.0
+
+  - name: implementar_historia
+    plugin: claude_code_runner
+    usa_output_anterior: true
+    params:
+      modo: "coding"
+      mcp_config_path: "C:/Users/luish/developer/ai-tools/ai-lup-workspace-automation/config/mcp-docusaurus.json"
+      historia_id: "{{ vars.historia_id }}"
+    retry:
+      max_attempts: 1

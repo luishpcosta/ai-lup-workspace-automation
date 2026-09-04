@@ -1,0 +1,35 @@
+# Cadeia real (curta: 2 etapas) para HIST-005, usada no teste real de execuções
+# paralelas independentes (ADR-003), junto com hist-006-remove-validation.yaml.
+# Roda de propósito só preparar_ambiente + implementar_historia (sem abrir PR) —
+# a etapa de PR já foi provada de verdade na ADR-002; o foco aqui é a concorrência.
+
+name: hist-005-version-flag
+
+vars:
+  historia_id: "HIST-005"
+  branch_name: "feature/HIST-005-version-flag"
+
+steps:
+  - name: preparar_ambiente
+    plugin: workspace_setup
+    usa_output_anterior: false
+    params:
+      repo_url: "C:/Users/luish/developer/ai-tools/ai-lup-workspace-automation/samples/target-cli"
+      branch_base: "main"
+      branch_name: "{{ vars.branch_name }}"
+      historia_id: "{{ vars.historia_id }}"
+      install_cmd: "npm install"
+    retry:
+      max_attempts: 2
+      initial_delay: 5.0
+      multiplier: 2.0
+
+  - name: implementar_historia
+    plugin: claude_code_runner
+    usa_output_anterior: true
+    params:
+      modo: "coding"
+      mcp_config_path: "C:/Users/luish/developer/ai-tools/ai-lup-workspace-automation/config/mcp-docusaurus.json"
+      historia_id: "{{ vars.historia_id }}"
+    retry:
+      max_attempts: 1

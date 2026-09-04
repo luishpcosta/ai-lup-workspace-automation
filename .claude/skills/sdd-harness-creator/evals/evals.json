@@ -1,0 +1,53 @@
+{
+  "skill": "sdd-harness-creator",
+  "cases": [
+    {
+      "id": "trigger-create",
+      "kind": "trigger",
+      "prompt": "Set up spec-driven development in this repo so the agent writes a spec before coding.",
+      "should_trigger": true
+    },
+    {
+      "id": "trigger-constitution",
+      "kind": "trigger",
+      "prompt": "I want a constitution plus per-feature spec/plan/tasks with acceptance-criteria traceability.",
+      "should_trigger": true
+    },
+    {
+      "id": "trigger-migrate",
+      "kind": "trigger",
+      "prompt": "We have an old spec-registry.json from this harness lying around — help us migrate off it.",
+      "should_trigger": true
+    },
+    {
+      "id": "negative-audit-score",
+      "kind": "trigger",
+      "prompt": "Give me a structural score for our SDD harness across constitution, planning, and verification.",
+      "should_trigger": false
+    },
+    {
+      "id": "negative-model-choice",
+      "kind": "trigger",
+      "prompt": "Which Claude model should I use for summarization?",
+      "should_trigger": false
+    },
+    {
+      "id": "negative-classic-harness",
+      "kind": "trigger",
+      "prompt": "Just give me a simple feature list and an init script, no specs.",
+      "should_trigger": false
+    },
+    {
+      "id": "behavior-clean-scaffold",
+      "kind": "behavior",
+      "prompt": "A freshly scaffolded harness should have no separate state file — each feature's phase lives in its own markdown.",
+      "expect": "create-sdd-harness.mjs writes no spec-registry.json; spec.md/plan.md/tasks.md each carry a **Phase:** line"
+    },
+    {
+      "id": "behavior-deprecated-scripts-noop",
+      "kind": "behavior",
+      "prompt": "An older project still calls check-traceability.mjs from init.sh against a spec-registry.json it has on disk. Running it must not break init.sh.",
+      "expect": "check-traceability.mjs and validate-sdd-harness.mjs always exit 0 and print a deprecation notice, regardless of spec-registry.json content"
+    }
+  ]
+}
