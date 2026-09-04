@@ -7,9 +7,10 @@ depende_de: []
 
 Motor de workflow local (Python) que orquestra uma cadeia configurável de etapas via
 plugins, mais os pontos de entrada e observabilidade construídos em torno dele
-(CLI, execuções paralelas, API HTTP, streaming). Ver `adr/` para o histórico completo
-de decisões (ADR-001 a ADR-006) — a partir da ADR-006 este contexto passa a ser
-consumido pelo contexto [frontend](../../../frontend/docs/CONTEXT.md).
+(CLI, execuções paralelas, API HTTP, streaming). Ver `adr/` para o histórico de
+decisões deste contexto (ADR-001 a ADR-005) — a partir da ADR-006 (decidida no
+diretório do contexto [frontend](../../../frontend/docs/CONTEXT.md), que a mantém
+em `frontend/adr/`) este contexto passa a ser consumido por ele via REST/SSE.
 
 ## Linguagem
 

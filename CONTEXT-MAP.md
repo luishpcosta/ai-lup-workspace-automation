@@ -19,16 +19,25 @@ controle web, decidido na ADR-006, ainda não implementado — ver Planejamento)
 
 ## Decisões (ADR)
 
-- [Registro de decisões](./backend/adr/) — ADR-001 a ADR-006. ADR-001 a ADR-005 em
-  `contextos: [motor-workflow]`; ADR-006 em `contextos: [frontend]`,
-  `afeta: [motor-workflow]`. Ver `backend/adr/ADR-00N-*.md` para o front matter de
-  relação (`depende_de`/`afeta`/`supera`) de cada uma.
+Cada contexto mantém seu próprio diretório de ADRs, mas a **numeração é global e
+sequencial entre eles** (não reinicia por contexto) — antes de criar uma ADR nova,
+em qualquer contexto, confira o maior número já usado nos dois diretórios abaixo.
+
+- [Registro de decisões — motor-workflow](./backend/adr/) — ADR-001 a ADR-005,
+  todas em `contextos: [motor-workflow]`.
+- [Registro de decisões — frontend](./frontend/adr/) — ADR-006 (`contextos:
+  [frontend]`, `afeta: [motor-workflow]`) — próxima ADR nova, em qualquer
+  contexto, é ADR-007.
+
+Ver `<contexto>/adr/ADR-00N-*.md` para o front matter de relação
+(`depende_de`/`afeta`/`supera`) de cada uma.
 
 ## Planejamento (to-be)
 
 - **motor-workflow**: [specs](./backend/docs/specs/) — spec/plan/tasks por feature
   (harness SDD, `backend/AGENTS.md`), uma pasta por feature numerada (`001-...` a
   `005-...`, todas implementadas).
-- **frontend**: decidido na ADR-006 (painel de controle v1 via REST/SSE); specs
-  (`spec.md`/`plan.md`/`tasks.md`) ainda não escritas — próximo passo antes de
-  codificar, por `AGENTS.md`.
+- **frontend**: harness SDD próprio criado (`frontend/AGENTS.md`,
+  `frontend/constitution.md`, `frontend/init.sh`); [specs](./frontend/docs/specs/)
+  ainda vazio — `docs/specs/006-frontend-painel-controle/{spec,plan,tasks}.md` (a
+  partir da ADR-006) é o próximo passo antes de codificar, por `frontend/AGENTS.md`.
