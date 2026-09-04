@@ -30,3 +30,9 @@ backend/run-many-state/
 
 # Logs de ./start-local.sh (backend/frontend rodando localmente).
 /.local-logs/
+
+# Symlink local para .agents/skills/ui-craft/ (conteudo real, versionado).
+# core.symlinks=false neste ambiente faz o git desreferenciar e duplicar todo
+# o conteudo se este caminho for adicionado — o instalador da skill recria o
+# link sozinho quando necessario.
+/.claude/skills/ui-craft
