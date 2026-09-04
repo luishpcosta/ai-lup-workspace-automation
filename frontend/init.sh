@@ -3,8 +3,17 @@ set -e
 
 echo "=== SDD Harness Initialization ==="
 
-echo "=== echo \"No package manifest detected; replace this line with your project verification command.\" ==="
-echo "No package manifest detected; replace this line with your project verification command."
+echo "=== npm install ==="
+npm install
+
+echo "=== npm test ==="
+npm test
+
+echo "=== npm run build ==="
+npm run build
+
+echo "=== npm run lint ==="
+npm run lint
 
 echo "=== Verification Complete ==="
 echo ""

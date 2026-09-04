@@ -25,19 +25,18 @@ humano, nunca contornados silenciosamente.
 
 ## Technical Constraints
 
-- **Language / stack**: React + Vite (ADR-006). Framework de teste, linter e uso
-  de TypeScript ainda não decididos — a definir na atividade ADR-006-AT-01
-  (scaffold), antes de `init.sh` ter comandos de verificação reais.
-- **Test framework**: `<a definir no AT-01>`
-- **Style / lint**: `<a definir no AT-01>`
+- **Language / stack**: React 19 + Vite 8, JavaScript (sem TypeScript nesta
+  versão — ver `docs/specs/006-frontend-painel-controle/plan.md`, Key Decisions).
+- **Test framework**: Vitest + Testing Library (`jsdom`).
+- **Style / lint**: `oxlint` (`npm run lint`).
 - **Architecture boundaries**: SPA de processo único, sem estado compartilhado
   com o backend além de REST/SSE; nenhum dado sensível fora de `localStorage`
   (sem autenticação nesta versão, ADR-006 RNF-01).
 
 ## Quality Bar
 
-- Verification command(s) que devem passar: `./init.sh` (hoje um placeholder —
-  `echo "No package manifest detected..."` — até o scaffold do AT-01 existir).
+- Verification command(s) que devem passar: `./init.sh` (`npm install && npm test
+  && npm run build && npm run lint`).
 - Coverage / review expectations: toda AC de
   `docs/specs/006-frontend-painel-controle/spec.md` precisa de evidência antes
   de a feature ser marcada `done` em `tasks.md`.

@@ -294,3 +294,31 @@ def test_cancel_unknown_chain_ac10(tmp_path):
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+
+
+def test_cors_allows_cross_origin_requests_from_the_frontend_ac11(tmp_path):
+    app = build_app(plugins_dir=str(tmp_path / "plugins"), watch_dir=str(tmp_path / "watch"))
+    client = TestClient(app)
+
+    response = client.get("/runs", headers={"Origin": "http://localhost:5173"})
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_cors_preflight_allows_post_with_content_type_ac11(tmp_path):
+    app = build_app(plugins_dir=str(tmp_path / "plugins"), watch_dir=str(tmp_path / "watch"))
+    client = TestClient(app)
+
+    response = client.options(
+        "/runs",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "POST" in response.headers["access-control-allow-methods"]

@@ -27,6 +27,11 @@ the chain's YAML config (`_resolve_active_claude_step`) — no dependency on
 (same convention as `session_log_path`, ADR-002). Because that mechanism is
 file-based, it works identically whether the run was started by this `serve`
 process, by `run`, or by `run-many` in a terminal (ADR-005, RNF-01).
+
+`CORSMiddleware` (ADR-006, contexto `frontend`) is the only change made on this
+module's behalf of the new frontend: permissive by decision (`allow_origins=["*"]`,
+no credentials), consistent with "no authentication in this version" — not an
+oversight. No route, payload, or error contract changes.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -313,6 +319,16 @@ def build_app(
     state = ServerState(plugins_dir, watch_dir, max_parallel, correlation_keys)
     app = FastAPI(title="workflow_engine serve")
     app.state.server = state
+
+    # ADR-006, AT-06: habilita o frontend (dev server em outra origem) a chamar esta
+    # API. Sem credenciais (RNF-01, sem autenticação nesta versão) — permissivo por
+    # decisão explícita, não descuido; ver ADR-006, Riscos.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
 
     @app.exception_handler(HTTPException)
     def _flat_error(request: Request, exc: HTTPException) -> JSONResponse:

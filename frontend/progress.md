@@ -3,70 +3,95 @@
 ## Current State
 
 **Last Updated:** 2026-09-04
-**Active Feature:** Nenhuma ainda — ADR-006 decidida, `docs/specs/006-frontend-painel-controle/` não escrita
-**Active SDD Phase:** Pré-Specify (harness recém-criado)
-**Pending Gate:** Escrever `docs/specs/006-frontend-painel-controle/spec.md` a partir de `adr/ADR-006-frontend-painel-controle.md` + `adr/ADR-006-acs.md`, antes de qualquer código (`AGENTS.md`, princípio 1)
+**Active Feature:** 006-frontend-painel-controle — Painel de Controle Frontend v1 (REST/SSE) — Verify, `done`
+**Active SDD Phase:** Verify
+**Pending Gate:** Nenhum. Todas as 13 ACs (AC-01 a AC-13) implementadas e verificadas — ver `docs/specs/006-frontend-painel-controle/tasks.md`.
 
 ## Status
 
 ### What's Done
 
-- [x] Contexto `frontend` criado no monorepo (antes só pasta reservada; ver `../CONTEXT-MAP.md`)
-- [x] ADR-006 escrita e revisada com achados de uma entrevista de descoberta UX
-  (skill `ux-discovery-interviewer`): disparo em lote por ID de documento de
-  referência, destaque visual passivo de erro, resolução de ID→`config_path` por
-  convenção de nome de arquivo configurável
-- [x] Harness SDD deste diretório criado com `sdd-harness-creator`
-  (`AGENTS.md`, `constitution.md`, `init.sh`, este `progress.md`) — exemplo padrão
-  removido, sem feature de placeholder
-- [x] `ADR-006-frontend-painel-controle.md`/`ADR-006-acs.md` movidas de
-  `backend/adr/` para `frontend/adr/` (antes indevidamente junto das ADRs do
-  motor-workflow) — numeração de ADR continua global/sequencial entre os dois
-  diretórios (próxima ADR nova, em qualquer contexto, é ADR-007)
+- [x] Harness SDD criado (`AGENTS.md`, `constitution.md`, `init.sh`, este `progress.md`)
+- [x] ADR-006 (com achados de entrevista de UX) movida para `adr/`
+- [x] `docs/specs/006-frontend-painel-controle/{spec,plan,tasks}.md` escritas a partir da ADR-006, gate de cobertura fechado (13 ACs, 12 tasks)
+- [x] Scaffold real: React 19 + Vite 5 (JS), Vitest + Testing Library, ESLint 9
+  (trocado de oxlint/Vite 8 padrão do `create-vite` — binários nativos
+  `rolldown`/`oxlint` não carregam no Node 20.17 desta máquina; downgrade
+  documentado, não escondido — ver Decisions Made)
+- [x] `lib/config.js`, `lib/resolveConfigPath.js`, `lib/apiClient.js` (erro tipado
+  conexão/HTTP; `openStream` via `fetch`+`ReadableStream`, não `EventSource`, para
+  distinguir 409 de 200)
+- [x] `SettingsScreen`, `RunsList` (destaque visual de falha), `RunDetail`
+  (tabela por etapa + cancelar), `TriggerForm` (disparo em lote por ID de
+  documento de referência), `StreamPanel`, `InstructionBox`
+- [x] `CORSMiddleware` em `backend/.../http_api.py::build_app` (única mudança de
+  backend; 2 testes de regressão novos, `backend/tests/test_http_api.py`)
+- [x] 40/40 testes do frontend passando, `npm run lint`/`npm run build` limpos
+- [x] 87/87 testes do backend passando (inclui as 2 novas AC-11), `ruff` limpo
+- [x] **Verificação real** (não só mocks): `workflow serve` real (porta 8010) +
+  `vite` dev server real (porta 5183) rodando simultaneamente; `curl` com header
+  `Origin` real confirmou `access-control-allow-origin: *` e preflight `OPTIONS`
+  real confirmou `access-control-allow-methods: GET, POST` — CORS funciona de
+  ponta a ponta, não é só suposição de que o middleware está certo
 
 ### What's In Progress
 
-- [ ] Nenhuma tarefa de implementação iniciada — só harness e ADR prontos
+- [ ] Nenhuma — feature completa
 
 ### What's Next
 
-1. Escrever `docs/specs/006-frontend-painel-controle/{spec,plan,tasks}.md` a
-   partir da ADR-006 (Specify → Clarify → Plan → Tasks, um gate de cada vez)
-2. Só então iniciar o scaffold real (React + Vite, ADR-006-AT-01) e substituir o
-   placeholder de `init.sh` por comandos de verificação reais
+Nenhuma feature nova especificada ainda. Possível próximo passo (não pedido
+ainda): executar o rename pendente de `historia_id` (registrado como decisão
+pendente na ADR-006, atravessa vocabulário de ADR-001/002 no backend).
 
 ## Open Clarifications
 
-Nenhuma pendente e bloqueante (as clarificações da elicitação e da entrevista de
-UX já foram resolvidas e estão registradas na própria ADR-006).
+Nenhuma pendente e bloqueante.
 
 ## Blockers / Risks
 
-- [ ] `init.sh` ainda é um placeholder (`echo "No package manifest detected..."`)
-  — só vira verificação real depois do scaffold (AT-01); não é um bug, é o
-  estado esperado antes de existir `package.json`.
+- [ ] Testes desta feature não cobrem um navegador real (sem Playwright neste
+  ambiente) — só unidade/integração com `fetch`/stream mockados. A parte que
+  não podia ser mockada com confiança (CORS real) foi verificada com processos
+  reais (ver acima); o que fica sem cobertura automática é só a interação
+  visual (layout, destaque CSS).
+- [ ] `npm audit` reporta 5 vulnerabilidades (3 moderate, 1 high, 1 critical) —
+  todas do mesmo problema conhecido do `esbuild` do Vite 5 (dev server aceita
+  requisição de qualquer site enquanto roda localmente, GHSA-67mh-4wv8-2f99).
+  Afeta só o dev server local, não o build de produção. Aceito nesta versão
+  (mesma postura de "uso local/individual, sem auth" já decidida na ADR-006);
+  revisitar ao considerar Vite 6+ quando o Node desta máquina for atualizado.
 
 ## Decisions Made
 
-- **ADR-006 física em `frontend/adr/`, não em `backend/adr/`**: description —
-  cada contexto do monorepo mantém seu próprio diretório de decisões; a
-  numeração (`ADR-00N`) continua global/sequencial entre os dois, só a
-  localização física do arquivo muda.
-  - Context: pedido explícito do usuário ao notar a inconsistência antes de
-    avançar para a fase de specs.
-  - Constitution impact: nenhum amendment — é a primeira constituição deste
-    diretório (`frontend/constitution.md`), criada nesta mesma sessão.
+- **Vite 8 (`rolldown`) e `oxlint` trocados por Vite 5 e ESLint 9**: description
+  — o `create-vite` padrão instalou Vite 8 + `oxlint`, ambos com binário nativo
+  que não carrega no Node 20.17.0 desta máquina (`EBADENGINE`, requer
+  `^20.19.0 || >=22.12.0`). Vite 5 + ESLint 9 (`^18.18.0 || ^20.9.0`) funcionam
+  de verdade nesta máquina — testado (`npm run build`/`npm run lint` reais).
+  - Context: descoberto ao rodar `npm run build` pela primeira vez (erro real
+    de módulo nativo ausente, não suposição).
+  - Constitution impact: `constitution.md` já reflete React 19 + Vite 5 +
+    Vitest + ESLint como stack real (não mais "a definir").
+- **Disparo em lote atualiza a listagem, não navega automaticamente para
+  detalhe**: com vários IDs disparados de uma vez, não há "o" item para
+  navegar — `TriggerForm` chama `onDispatched()` ao final do lote, que só
+  força um refresh de `RunsList`. Corrigido também o texto de `spec.md`
+  AC-06, que ainda dizia "leva ao detalhe" (divergência da própria ADR-006-acs.md).
 
 ## Evidence of Completion
 
-- [x] Harness criado e paths corrigidos (`docs/specs/` em vez de `specs/` em
-  `AGENTS.md`/`init.sh`, mesma convenção do `backend/`)
-- [x] Grafo revalidado com `graph_query.py` após mover a ADR-006 (ver notas da
-  sessão em `../progress.md` do backend, ou o commit correspondente)
+- [x] AC-01 a AC-13 verificadas: `docs/specs/006-frontend-painel-controle/tasks.md`
+  (T-1 a T-12, todas `done`, evidência por tarefa)
+- [x] Coverage check limpo: toda AC tem ≥1 task e toda task referencia uma AC
+- [x] `npm test` → 40 passed; `npm run build` → ok; `npm run lint` → limpo
+- [x] `python -m pytest` (backend) → 87 passed; `ruff check`/`format` → limpos
+- [x] Verificação real ponta a ponta (processos reais, não `TestClient`/mock) —
+  ver "What's Done" acima
 
 ## Notes for Next Session
 
-Antes de qualquer código: escrever `docs/specs/006-frontend-painel-controle/
-spec.md`. O par `adr/ADR-006-frontend-painel-controle.md` + `adr/ADR-006-acs.md`
-já tem tudo que o spec precisa (requisitos, ACs, decisões, riscos) — é
-transcrição/formatação para o formato SDD, não elicitação nova.
+Feature 006 está completa e verificada. Se uma nova demanda de frontend
+aparecer, a próxima ADR (em qualquer contexto) é `ADR-007` (numeração global,
+ver `../CONTEXT-MAP.md`). O rename pendente de `historia_id` (ADR-006,
+Consequências) segue em aberto, sem prazo definido.

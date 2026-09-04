@@ -4,7 +4,16 @@
 
 **Last Updated:** 2026-09-04
 **Active Feature:** 005-stream-interacao-agente - Streaming ao vivo + interação com o agente — Verify, `done`
-**Pending Gate:** Nenhum. Todas as 5 ADRs (001-005) implementadas, testadas e verificadas. Nenhuma próxima feature especificada ainda.
+**Pending Gate:** Nenhum. Todas as 5 ADRs (001-005) deste contexto implementadas, testadas e verificadas.
+
+**Nota (mudança pequena, feita pela feature `006-frontend-painel-controle` do contexto
+`frontend`)**: `CORSMiddleware` adicionado a `build_app()` em `http_api.py` —
+nenhuma rota/payload muda, só transporte. Verificado ao vivo com um `workflow serve`
+real (não só `TestClient`): `curl` com header `Origin` real confirmou
+`access-control-allow-origin: *`, preflight `OPTIONS` real confirmou
+`access-control-allow-methods: GET, POST`. 2 testes de regressão novos em
+`tests/test_http_api.py` (87/87 no total). Detalhes completos em
+`../frontend/progress.md`.
 
 **Features anteriores, todas Verify/`done`**:
 - 004-api-http-monitoria (`workflow serve`) — `POST /runs`, `GET /runs`(`/{chain_name}`), `POST /runs/{chain_name}/cancelar`.
