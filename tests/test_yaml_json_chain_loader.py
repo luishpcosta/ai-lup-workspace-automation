@@ -54,6 +54,11 @@ def test_unknown_plugin_fails_before_execution_ac04(tmp_path):
         load_chain(config, known_plugins={"echo"})
 
 
+def test_missing_config_file_raises_chain_validation_error_not_raw_os_error(tmp_path):
+    with pytest.raises(ChainValidationError, match="not found"):
+        load_chain(tmp_path / "does-not-exist.yaml", known_plugins={"echo"})
+
+
 def test_missing_name_is_rejected(tmp_path):
     config = tmp_path / "chain.yaml"
     config.write_text("steps:\n  - name: s1\n    plugin: echo\n", encoding="utf-8")

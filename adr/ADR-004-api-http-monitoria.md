@@ -51,7 +51,7 @@ nenhum plugin existente.
 | RF-02 | `POST /runs`: dispara uma execução de forma assíncrona (responde na hora com identificador, não espera terminar) | Funcional |
 | RF-03 | `GET /runs`: lista execuções conhecidas, agregando todos os arquivos `.db` de um diretório observado (`--watch-dir`) — inclui execuções disparadas por `workflow run`/`run-many` no terminal, desde que apontem `--db`/`--db-dir` para esse mesmo diretório | Funcional |
 | RF-04 | `GET /runs/{chain_name}`: detalhe de uma execução (status por etapa, timestamps, erro se houver) | Funcional |
-| RF-05 | `POST /runs/{chain_name}/cancelar`: aborta uma execução — garantido apenas para execuções disparadas pela própria API | Funcional |
+| RF-05 | `POST /runs/{chain_name}/cancelar`: cancela uma execução **ainda não iniciada** (na fila do pool) — garantido apenas para execuções disparadas pela própria API; para uma etapa já em andamento, informa que não é suportado em vez de fingir que cancelou | Funcional |
 | RNF-01 (herdado) | Uso local/individual — sem autenticação/multi-tenant nesta versão | Não-funcional |
 | RNF-02 | Contrato de erro HTTP uniforme (`{"error": {"code", "message"}}`) em todos os endpoints | Não-funcional |
 | RNF-03 | `POST /runs` é protegido contra disparo duplicado concorrente do mesmo `chain_name` (409, não corrida silenciosa no SQLite) | Não-funcional |
@@ -102,9 +102,21 @@ Erro uniforme em todo endpoint desta ADR: status HTTP apropriado + corpo
 - 200: `{"chain_name", "run_id", "status", "created_at", "updated_at", "steps": [{"step_name", "status", "attempt_count", "started_at", "finished_at", "error_message"}]}`. `input`/`output` de cada etapa só entram se `?include=io` for passado (evita payload grande por padrão — os JSONs de `session_log_path`/`docs_referenced` etc. podem ser grandes).
 - 404 (`code: "not_found"`) se não existir `<watch-dir>/<chain_name>.db`.
 
-**`POST /runs/{chain_name}/cancelar`**
-- 200: `{"chain_name", "status": "cancelling"}` — só funciona se a execução foi disparada por este processo `serve` (handle do processo/thread em memória). Mata a etapa em andamento (`Popen.terminate()`/equivalente) e marca a run como `failed` no `.db`.
-- 409 (`code: "not_cancellable"`) se a execução não foi disparada por este processo `serve` (ex.: foi um `workflow run` no terminal) — mensagem explica que o cancelamento nesse caso é feito interrompendo o processo do CLI diretamente.
+**`POST /runs/{chain_name}/cancelar`** — escopo revisado ao desenhar a implementação
+(ver nota abaixo): `WorkflowEngine`/plugins não expõem hoje um handle do processo
+externo (`subprocess.run` é uma chamada bloqueante interna de cada plugin, sem
+retorno do `Popen` para quem chamou) — matar de fato uma etapa **já em execução**
+exigiria mudar esse contrato, fora do escopo desta ADR.
+- 200 (`status: "cancelled"`) se a etapa atual ainda **não começou a rodar** (ainda na
+  fila do pool de threads, aguardando vaga) — cancelamento real via
+  `Future.cancel()`, garantido pela biblioteca padrão do Python.
+- **409 (`code: "already_running"`)** se a etapa atual **já está em execução** — a API
+  não mata o processo, só informa isso claramente; nenhuma falsa promessa de
+  cancelamento imediato. Matar a etapa nesse caso continua sendo interromper o
+  processo (`serve` ou `workflow run`) diretamente.
+- 409 (`code: "not_cancellable"`) se a execução não foi disparada por este processo
+  `serve` (ex.: foi um `workflow run` no terminal) — mesma limitação, agora também
+  citando que nem para runs do próprio `serve` o cancelamento de etapa em andamento é suportado.
 - 404 (`code: "not_found"`) se `chain_name` não existe em nenhuma execução conhecida.
 
 ## Alternativas consideradas
@@ -128,7 +140,12 @@ Erro uniforme em todo endpoint desta ADR: status HTTP apropriado + corpo
   monitorável — não é automático (execuções com o `--db` default antigo,
   `./workflow_state.db`, não aparecem em `GET /runs` a menos que o usuário mude o
   caminho); cancelamento é assimétrico (funciona via API, não via terminal) — decisão
-  consciente, não uma limitação escondida.
+  consciente, não uma limitação escondida; cancelamento de uma etapa **já em
+  execução** não é suportado nesta versão (só cancela o que ainda está na fila) —
+  descoberto ao desenhar a implementação: `subprocess.run` dentro de cada plugin é
+  bloqueante e não expõe o `Popen` para quem chamou, então não há hoje um handle pra
+  matar. Resolver isso de verdade exigiria mudar o contrato de execução dos plugins —
+  fora de escopo aqui, registrado como risco/trabalho futuro.
 - **Riscos**: nenhuma autenticação (RNF-01 herdado) — expor `--port` além de
   `localhost` sem proteção adicional seria um risco real, fora de escopo desta ADR
   tratar; leitura de múltiplos `.db` em `GET /runs` pode ficar lenta se o diretório

@@ -3,11 +3,81 @@
 ## Current State
 
 **Last Updated:** 2026-09-04
-**Active Feature:** 003-execucoes-paralelas-independentes - Execuções Paralelas Independentes (run-many)
-**Active SDD Phase:** Tasks (gate de cobertura passou — pronto para Implement; nenhuma tarefa iniciada ainda)
-**Pending Gate:** Nenhum pendente para Specify/Clarify/Plan/Tasks (ver `specs/003-execucoes-paralelas-independentes/tasks.md`). Próximo: Implement (T-1 a T-4).
+**Active Feature:** 004-api-http-monitoria - API HTTP e Monitoria de Workflows (workflow serve) — Verify, `done`
+**Pending Gate:** Nenhum. Próxima feature especificada mas **não implementada**: 005-stream-interacao-agente (ADR-005, depende desta) — reescreve `claude_code_runner.py` para `Popen`+stream-json, ainda não tem `specs/005-.../` escrito.
 
-**Feature anterior:** 002-plugins-poc-pipeline-sdd — Verify, `done`, incluindo um teste real ponta a ponta completo (PR real mesclável, 3 bugs reais achados/corrigidos) — ver seção "Execução real completa" abaixo. 001-motor-workflow-plugins — Verify, `done`.
+**Features anteriores, todas Verify/`done`**:
+- 003-execucoes-paralelas-independentes (`workflow run-many`) — 4 ACs a 10, `ThreadPoolExecutor`, State Store isolado por `chain_name`.
+- 002-plugins-poc-pipeline-sdd — incluindo um teste real ponta a ponta completo (3 PRs reais mescladas em `github.com/luishpcosta/ai-lup-poc-target-cli`, 3 bugs reais achados/corrigidos) — ver seção "Execução real completa" abaixo.
+- 001-motor-workflow-plugins — núcleo do motor.
+
+## Sessão 2026-09-04 (3) — ADR-004: API HTTP e monitoria (workflow serve)
+
+Nova demanda informal ("quero outras portas de entrada como http e endpoints de
+monitoria... conectar via stream no runner... até interagir se necessário"),
+elicitada via skill `issue-to-adr`. Escopo dividido em duas ADRs a pedido do usuário:
+
+- **ADR-004** (`adr/ADR-004-api-http-monitoria.md` + acs, 4 atividades, 10+1 ACs) —
+  implementada nesta sessão. Novo comando `workflow serve`, reaproveita
+  `WorkflowEngine`/plugins/State Store exatamente como `run-many`. **Requisito chave do
+  usuário**: monitoria precisa enxergar execuções disparadas por terminal OU API —
+  resolvido com uma convenção de "diretório observado" (`--watch-dir`), sem qualquer
+  acoplamento entre quem dispara e quem lê (leitura via `sqlite3` direto nos `.db`,
+  sem passar pelo `StateStorePort`).
+- **ADR-005** (`adr/ADR-005-stream-interacao-agente.md` + acs, 5 atividades, 10 ACs) —
+  **só desenhada, não implementada ainda**. Streaming ao vivo + interação em tempo
+  real com o agente. Verificado **ao vivo** nesta sessão (não suposição): `claude -p
+  --input-format stream-json --output-format stream-json --verbose
+  --permission-mode bypassPermissions` aceita uma instrução nova pelo stdin
+  **enquanto já está processando** — testado mandando "conte de 1 a 5" e, no meio,
+  "pare, responda X"; o agente mudou de direção de verdade. Mecanismo desenhado:
+  arquivos (não memória) — `session_log_path` escrito incrementalmente +
+  `<step>.instrucoes.jsonl` — porque o requisito de "ver ambos" também vale pro
+  streaming (um `workflow run` no terminal é outro processo do SO).
+
+### Implementação real da ADR-004 (specs/004-api-http-monitoria, T-1 a T-4, `done`)
+
+`src/workflow_engine/adapters/http_api.py` (novo) + extensão pontual de `cli.py`
+(subparser `serve`). 11 testes novos (`tests/test_http_api.py`), suíte completa **77
+passed**. **Escopo revisado ao desenhar a implementação** (registrado na própria
+ADR-004, não escondido): cancelamento de uma etapa **já em execução** não é suportado
+— `subprocess.run` dentro de cada plugin é bloqueante e nunca expõe o `Popen` pra quem
+chama, então não há handle pra matar de verdade; `/cancelar` só cancela o que ainda
+está na fila (`Future.cancel()`, garantido pela stdlib) e responde 409 honesto pro
+resto, em vez de fingir que cancelou.
+
+**2 bugs reais achados pelos testes** (não hipotéticos — apareceram rodando):
+1. `YamlJsonChainLoader` (herdado da `001`) nunca checava se o arquivo do config
+   existe — `workflow run <inexistente>` quebrava com `FileNotFoundError` cru em vez
+   de erro limpo. Corrigido na fonte (`_read_raw`/`load`), beneficia `run`/`run-many`/
+   `serve` igualmente. Teste de regressão em `test_yaml_json_chain_loader.py`.
+2. FastAPI aninha `HTTPException.detail` sob a chave `"detail"` por padrão — quebrava
+   o contrato documentado (`{"error": {"code","message"}}` plano). Corrigido com um
+   `@app.exception_handler(HTTPException)` customizado.
+
+**Smoke-test manual real** (não só `TestClient`): subiu `workflow serve` de verdade
+(`uvicorn`), bateu com `curl` real em todos os 4 endpoints — `POST /runs` (202,
+assíncrono), `GET /runs` (lista agregada do watch-dir), `GET /runs/{chain_name}`
+(com e sem `?include=io`, output do plugin aparece corretamente parseado como JSON),
+`POST /runs/{x}/cancelar` (404 para desconhecido). Confirma que o `uvicorn.run()`
+real funciona, não só o `TestClient` in-process.
+
+### Trabalho de infraestrutura desta sessão (fora do fluxo SDD normal, a pedido do usuário)
+
+- **Git inicializado na raiz do repo** (não existia antes) — commit inicial de 114
+  arquivos, `.gitignore` cobrindo estado gerado (`workspaces/`, `run-many-state/`,
+  `*.db`, logs ad-hoc) e excluindo `samples/target-cli/` (repo git próprio, já
+  publicado separadamente).
+- **Repositório remoto criado**: `github.com/luishpcosta/ai-lup-workspace-automation`
+  (privado), push do commit inicial.
+- **`CONTEXT-MAP.md` criado** (não existia) + `docs/motor-workflow/CONTEXT.md` —
+  contexto único do repo, registrando as 5 ADRs (001-005) no grafo de dependências da
+  skill `blueprintfy`. **Bug real achado e corrigido nas 5 ADRs**: o comentário HTML
+  de instrução de front matter (que a própria skill `issue-to-adr` manda colocar
+  antes do `---`) quebrava o parser real do `graph_query.py`, que exige `---` na
+  primeira linha do arquivo — movido o comentário para depois do front matter em
+  todas as 5 ADRs, validado rodando a ferramenta de verdade (`vigentes`/`impacto`
+  funcionando corretamente agora).
 
 ## Sessão 2026-09-04 (2) — ADR-003: execuções paralelas independentes
 

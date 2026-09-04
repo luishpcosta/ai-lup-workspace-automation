@@ -87,23 +87,32 @@ Então responde 404 com {"error": {"code": "not_found", ...}}
 
 ### Atividade ADR-004-AT-04: Cancelamento (`POST /runs/{chain_name}/cancelar`)
 
-- **Descrição**: Abortar uma execução em andamento — só garantido para execuções
-  disparadas pelo próprio processo `serve` (handle em memória); para as demais,
-  responde recusando de forma explícita, em vez de falhar silenciosamente.
+- **Descrição**: Cancelar uma execução disparada pelo próprio processo `serve`
+  **enquanto ainda está na fila do pool** (não começou a rodar) — `subprocess.run`
+  dentro de cada plugin é bloqueante e não expõe o processo externo para quem chamou,
+  então não há hoje um handle para matar uma etapa já em execução (ver ADR-004,
+  Consequências). A API é honesta sobre essa limitação em vez de fingir que cancelou.
 - **Depende de**: Disparo assíncrono (AT-02)
 
 **AC ADR-004-AC-08**
 ```
-Dado uma execução disparada por este processo `serve`, ainda em andamento
+Dado uma execução disparada por este processo `serve`, cuja etapa atual ainda não começou a rodar (na fila do pool, aguardando vaga)
 Quando POST /runs/{chain_name}/cancelar é chamado
-Então a execução é abortada, marcada "failed" no .db, e a resposta é 200 com {"chain_name", "status": "cancelling"}
+Então a execução é cancelada de verdade (via Future.cancel()) antes de qualquer etapa rodar, e a resposta é 200 com {"chain_name", "status": "cancelled"}
 ```
 
 **AC ADR-004-AC-09**
 ```
+Dado uma execução disparada por este processo `serve` cuja etapa atual JÁ está em execução
+Quando POST /runs/{chain_name}/cancelar é chamado
+Então responde 409 com {"error": {"code": "already_running", "message": "..."}} — não mata o processo, não marca a run como falha, só informa que cancelamento de etapa em andamento não é suportado
+```
+
+**AC ADR-004-AC-09b**
+```
 Dado uma execução em andamento que NÃO foi disparada por este processo `serve` (ex.: rodando via `workflow run` no terminal)
 Quando POST /runs/{chain_name}/cancelar é chamado
-Então responde 409 com {"error": {"code": "not_cancellable", "message": "..."}} explicando que essa execução precisa ser interrompida no processo que a disparou — nenhuma tentativa de matar processo é feita
+Então responde 409 com {"error": {"code": "not_cancellable", "message": "..."}} explicando que essa execução precisa ser interrompida no processo que a disparou
 ```
 
 **AC ADR-004-AC-10**
@@ -123,7 +132,7 @@ Então responde 404 com {"error": {"code": "not_found", ...}}
 | RF-02 | ADR-004 | AT-02 | AC-02, AC-03 | API HTTP | Pendente |
 | RF-03 | ADR-004 | AT-03 | AC-05 | API HTTP | Pendente |
 | RF-04 | ADR-004 | AT-03 | AC-06, AC-07 | API HTTP | Pendente |
-| RF-05 | ADR-004 | AT-04 | AC-08, AC-09, AC-10 | API HTTP | Pendente |
+| RF-05 | ADR-004 | AT-04 | AC-08, AC-09, AC-09b, AC-10 | API HTTP | Pendente |
 | RNF-01 (herdado) | ADR-001 | — | — | (ver ADR-001) | N/A |
 | RNF-02 | ADR-004 | AT-02, AT-03, AT-04 | AC-03, AC-04, AC-07, AC-09, AC-10 | API HTTP | Pendente |
 | RNF-03 | ADR-004 | AT-02 | AC-04 | API HTTP | Pendente |

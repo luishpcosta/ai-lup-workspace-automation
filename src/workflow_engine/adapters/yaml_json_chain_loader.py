@@ -35,6 +35,8 @@ class YamlJsonChainLoader(ChainLoaderPort):
         (AC-04), before any step runs.
         """
         path = Path(source)
+        if not path.is_file():
+            raise ChainValidationError(f"{path}: config file not found")
         raw = self._read_raw(path)
         if not isinstance(raw, dict):
             raise ChainValidationError(f"{path}: top-level config must be a mapping")

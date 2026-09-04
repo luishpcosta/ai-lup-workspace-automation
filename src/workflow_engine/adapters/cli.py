@@ -77,6 +77,37 @@ def build_parser() -> argparse.ArgumentParser:
         default="historia_id,branch,pr_number,pr_url",
         help="Same as `run --correlation-keys` (ADR-002, RNF-1). Default: %(default)s",
     )
+
+    serve_parser = subparsers.add_parser(
+        "serve", help="Run an HTTP server to trigger and monitor workflows (ADR-004)"
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=8000, help="Port to listen on (default: 8000)"
+    )
+    serve_parser.add_argument(
+        "--plugins-dir",
+        default="./plugins",
+        help="Directory to scan for plugins (default: ./plugins)",
+    )
+    serve_parser.add_argument(
+        "--watch-dir",
+        default="./run-many-state",
+        help=(
+            "Directory of per-chain SQLite state files to trigger into and monitor "
+            "(same convention as `run-many --db-dir`; default: %(default)s)"
+        ),
+    )
+    serve_parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=3,
+        help="Maximum number of concurrent executions this server will run (default: 3)",
+    )
+    serve_parser.add_argument(
+        "--correlation-keys",
+        default="historia_id,branch,pr_number,pr_url",
+        help="Same as `run --correlation-keys` (ADR-002, RNF-1). Default: %(default)s",
+    )
     return parser
 
 
@@ -210,6 +241,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_run(args)
     if args.command == "run-many":
         return cmd_run_many(args)
+    if args.command == "serve":
+        from workflow_engine.adapters.http_api import cmd_serve
+
+        return cmd_serve(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 
