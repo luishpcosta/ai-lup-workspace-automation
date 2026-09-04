@@ -6,25 +6,27 @@
 
 ## Componente: Frontend App (novo)
 
-### Atividade ADR-006-AT-01: Scaffold da SPA + configuração da URL base do backend
+### Atividade ADR-006-AT-01: Scaffold da SPA + configuração da URL base e diretório de configs
 
 - **Descrição**: Estrutura inicial React + Vite em `frontend/`; tela de configuração
-  onde o usuário informa `host:porta` do backend; valor persistido em `localStorage`;
-  cliente HTTP único que lê essa URL para toda chamada REST/SSE subsequente.
+  onde o usuário informa `host:porta` do backend **e** o diretório-base usado para
+  resolver ID de documento de referência → `config_path` (achado da entrevista de UX);
+  os dois valores são persistidos em `localStorage`; cliente HTTP único que lê a URL
+  para toda chamada REST/SSE subsequente.
 - **Depende de**: Nenhuma (primeira atividade do componente)
 
 **AC ADR-006-AC-01**
 ```
-Dado que o app abre pela primeira vez, sem nenhuma URL configurada
-Quando o usuário acessa a tela de configuração e informa a URL base do backend
-Então essa URL é persistida em localStorage e usada em toda chamada REST/SSE subsequente, sem precisar reconfigurar a cada sessão
+Dado que o app abre pela primeira vez, sem nenhuma configuração salva
+Quando o usuário acessa a tela de configuração e informa a URL base do backend e o diretório-base de configs
+Então os dois valores são persistidos em localStorage e usados em toda chamada REST/SSE e resolução de ID subsequente, sem precisar reconfigurar a cada sessão
 ```
 
 **AC ADR-006-AC-02**
 ```
-Dado que uma URL já foi configurada em uma sessão anterior
+Dado que URL base e diretório-base já foram configurados em uma sessão anterior
 Quando o app é recarregado
-Então ele volta a usar essa URL automaticamente, sem forçar a tela de configuração de novo
+Então ele volta a usar os dois automaticamente, sem forçar a tela de configuração de novo
 ```
 
 **AC ADR-006-AC-03**
@@ -36,10 +38,11 @@ Então exibe um erro claro de conexão, nunca uma tela travada esperando indefin
 
 ---
 
-### Atividade ADR-006-AT-02: Listagem de runs e detalhe por etapa
+### Atividade ADR-006-AT-02: Listagem de runs (com destaque de falha) e detalhe por etapa
 
 - **Descrição**: Tela lista todos os `chain_name` conhecidos pelo backend
-  (`GET /runs`); ao selecionar um, mostra o detalhe por etapa (`GET /runs/{chain_name}`).
+  (`GET /runs`), destacando visualmente os que estão com falha (achado da entrevista
+  de UX); ao selecionar um, mostra o detalhe por etapa (`GET /runs/{chain_name}`).
 - **Depende de**: AT-01
 
 **AC ADR-006-AC-04** (contrato REST, consumo)
@@ -56,19 +59,36 @@ Quando o usuário abre o detalhe
 Então chama GET /runs/{chain_name} e mostra, por etapa: step_name, status, attempt_count, started_at, finished_at, error_message (campos exatamente como devolvidos pelo endpoint, ADR-004); se o chain_name não existir, trata o 404 (not_found) exibindo mensagem clara
 ```
 
+**AC ADR-006-AC-12** (achado da entrevista de UX — destaque visual passivo)
+```
+Dado um run cujo status mais recente (campo status de GET /runs) indica falha
+Quando a tela de listagem exibe esse item
+Então a linha recebe um destaque visual (cor/ícone) que a diferencia de runs em andamento ou concluídos com sucesso — sem nenhuma notificação ativa (som, push do navegador), só destaque passivo na própria tela
+```
+
 ---
 
-### Atividade ADR-006-AT-03: Disparo de novo run
+### Atividade ADR-006-AT-03: Disparo de um ou vários runs por ID de documento de referência
 
-- **Descrição**: Formulário com um campo de texto para `config_path`; ao enviar,
-  chama `POST /runs`.
+- **Descrição**: Formulário aceita um ou mais IDs de documento de referência (achado
+  da entrevista de UX: não é mais "digitar um `config_path`"); para cada ID, a SPA
+  constrói `config_path = <diretório-base configurado>/<id>.yaml` (convenção exata de
+  nome de arquivo, sem glob — a SPA não lê o filesystem local) e chama `POST /runs`
+  uma vez por ID.
 - **Depende de**: AT-01
 
-**AC ADR-006-AC-06** (contrato REST)
+**AC ADR-006-AC-06** (contrato REST, revisado — disparo em lote)
 ```
-Dado que o usuário preenche um config_path no formulário e envia
-Quando a SPA chama POST /runs com corpo {"config_path": "<texto>"}
-Então em caso de sucesso (202, {"chain_name", "status": "started"}) leva o usuário para a tela de detalhe daquele chain_name; em caso de erro 400 (invalid_config) ou 409 (already_running) exibe a mensagem de erro correspondente (error.code/error.message, ADR-004) sem travar a tela
+Dado um ou mais IDs de documento de referência digitados/colados pelo usuário
+Quando o usuário dispara
+Então para cada ID a SPA constrói config_path = <diretório-base>/<id>.yaml e chama POST /runs com corpo {"config_path": "<caminho construído>"}; sucesso (202, {"chain_name", "status": "started"}) atualiza a lista com o chain_name daquele item; erro 400 (invalid_config) ou 409 (already_running) de um item exibe a mensagem correspondente (error.code/error.message, ADR-004) associada só àquele ID, sem impedir os demais itens do lote de serem disparados
+```
+
+**AC ADR-006-AC-13** (edge case de resolução)
+```
+Dado um ID cujo arquivo <diretório-base>/<id>.yaml não existe no backend
+Quando o POST /runs correspondente é chamado
+Então o backend responde 400 (invalid_config, contrato já existente na ADR-004) e a SPA exibe esse erro associado especificamente àquele ID, sem abortar a tentativa dos demais IDs do lote
 ```
 
 ---
@@ -141,13 +161,13 @@ Então o CORSMiddleware permite os métodos GET e POST e o header Content-Type, 
 | Requisito | ADR | Atividade | AC | Componente | Status |
 |---|---|---|---|---|---|
 | RF-01 | ADR-006 | AT-01 | AC-01, AC-02, AC-03 | Frontend App | Pendente |
-| RF-02 | ADR-006 | AT-02 | AC-04, AC-05 | Frontend App | Pendente |
-| RF-03 | ADR-006 | AT-03 | AC-06 | Frontend App | Pendente |
+| RF-02 | ADR-006 | AT-02 | AC-04, AC-05, AC-12 | Frontend App | Pendente |
+| RF-03 | ADR-006 | AT-03 | AC-06, AC-13 | Frontend App | Pendente |
 | RF-04 | ADR-006 | AT-04 | AC-07, AC-08, AC-09 | Frontend App | Pendente |
 | RF-05 | ADR-006 | AT-05 | AC-10 | Frontend App | Pendente |
 | RNF-01 | ADR-006 | AT-06 | AC-11 | API HTTP | Pendente |
 | RNF-02 | ADR-006 | AT-06 | AC-11 | API HTTP | Pendente |
-| RNF-03 | ADR-006 | AT-01, AT-02, AT-03, AT-04, AT-05 | AC-03, AC-05, AC-06, AC-08, AC-09, AC-10 | Frontend App | Pendente |
+| RNF-03 | ADR-006 | AT-01, AT-02, AT-03, AT-04, AT-05 | AC-03, AC-05, AC-06, AC-08, AC-09, AC-10, AC-13 | Frontend App | Pendente |
 
 > Atualize a coluna "Status" conforme as atividades avançam (Pendente / Em andamento /
 > Concluído / Bloqueado).
