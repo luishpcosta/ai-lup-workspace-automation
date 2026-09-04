@@ -42,14 +42,17 @@ precisa funcionar **igual para execuções disparadas por `serve`, por `run` ou 
 (descartado nesta ADR em favor de arquivos com caminho determinístico, mesma
 convenção já usada para `session_log_path` na ADR-002).
 
-**Assunções registradas durante a elicitação (Fase 1, não confirmadas):**
-- A composição de `--json-schema` com `--output-format stream-json` **não foi testada
-  ao vivo** nesta sessão — só `--output-format json` (sem streaming) foi testado com
-  `--json-schema`, e só `--output-format stream-json` (sem `--json-schema`) foi testado
-  para a interação em tempo real. Assumido que o evento final `type:"result"` do modo
-  streaming carrega o mesmo formato (`result` como string JSON escapada) validado
-  contra o schema — **a confirmar durante a implementação**, com uma chamada real
-  combinando os dois antes de considerar T-01 pronta.
+**Assunção fechada nesta revisão** (verificada ao vivo, já não é suposição): a
+composição `--json-schema` + `--output-format stream-json` foi testada de verdade.
+Achado real, diferente do assumido: a CLI usa uma **tool call interna**
+(`StructuredOutput`) para aplicar o schema, e o evento final `type:"result"` traz
+**dois** campos com o resultado — `result` (string JSON escapada, igual ao modo
+`--output-format json` sem streaming) **e** um campo novo `structured_output` (já um
+objeto/dict parseado, não uma string). `_parse_result` deve preferir
+`structured_output` quando presente (mais direto, sem parse duplo), caindo para
+`result`-como-string só como compatibilidade.
+
+**Assunções ainda registradas (não confirmadas):**
 - Interação só é aceita enquanto uma etapa `claude_code_runner` está com status
   "running" para aquele `chain_name` — não vira fila para uma sessão futura.
 - Cancelamento de uma sessão em streaming reusa o endpoint já definido na ADR-004
@@ -138,12 +141,13 @@ flowchart TD
   `serve` precisa recarregar a definição da cadeia a cada chamada de `/stream`/
   `/instrucoes` para saber qual etapa é `claude_code_runner` (custo pequeno, mas é
   I/O extra por requisição).
-- **Riscos**: a composição `--json-schema` + `--output-format stream-json` não foi
-  verificada ao vivo (ver Contexto) — se o formato do evento final for diferente do
-  assumido, `_parse_result` precisa de ajuste na implementação; polling de arquivo
-  para detectar linha nova pode perder uma instrução se duas chegarem entre dois
-  ciclos de poll rápidos demais (mitigável lendo todo o delta desde a última posição
-  lida, não só a última linha).
+- **Riscos**: polling de arquivo para detectar linha nova pode perder uma instrução
+  se duas chegarem entre dois ciclos de poll rápidos demais (mitigado lendo todo o
+  delta desde a última posição lida, não só a última linha); `structured_output`
+  (achado ao verificar `--json-schema` + `stream-json`) é um campo não documentado
+  publicamente até onde verificado nesta sessão — só `--help`/uma chamada real
+  confirmaram sua existência na versão instalada (`claude 2.1.260`); pode mudar em
+  versões futuras da CLI sem aviso, já que não é uma flag com contrato formal.
 
 ## Componentes afetados
 

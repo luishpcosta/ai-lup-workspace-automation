@@ -3,13 +3,62 @@
 ## Current State
 
 **Last Updated:** 2026-09-04
-**Active Feature:** 004-api-http-monitoria - API HTTP e Monitoria de Workflows (workflow serve) — Verify, `done`
-**Pending Gate:** Nenhum. Próxima feature especificada mas **não implementada**: 005-stream-interacao-agente (ADR-005, depende desta) — reescreve `claude_code_runner.py` para `Popen`+stream-json, ainda não tem `specs/005-.../` escrito.
+**Active Feature:** 005-stream-interacao-agente - Streaming ao vivo + interação com o agente — Verify, `done`
+**Pending Gate:** Nenhum. Todas as 5 ADRs (001-005) implementadas, testadas e verificadas. Nenhuma próxima feature especificada ainda.
 
 **Features anteriores, todas Verify/`done`**:
-- 003-execucoes-paralelas-independentes (`workflow run-many`) — 4 ACs a 10, `ThreadPoolExecutor`, State Store isolado por `chain_name`.
+- 004-api-http-monitoria (`workflow serve`) — `POST /runs`, `GET /runs`(`/{chain_name}`), `POST /runs/{chain_name}/cancelar`.
+- 003-execucoes-paralelas-independentes (`workflow run-many`) — `ThreadPoolExecutor`, State Store isolado por `chain_name`.
 - 002-plugins-poc-pipeline-sdd — incluindo um teste real ponta a ponta completo (3 PRs reais mescladas em `github.com/luishpcosta/ai-lup-poc-target-cli`, 3 bugs reais achados/corrigidos) — ver seção "Execução real completa" abaixo.
 - 001-motor-workflow-plugins — núcleo do motor.
+
+## Sessão 2026-09-04 (4) — ADR-005: streaming ao vivo + interação real com o agente
+
+Implementação da feature mais arriscada desta sequência: reescrita do
+`plugins/claude_code_runner.py` (já em produção, PR real mesclada na `002`) de
+`subprocess.run` bloqueante para `Popen` de longa duração com
+`--input-format/--output-format stream-json`.
+
+**Verificação real feita ANTES de codificar** (não depois):
+1. `--json-schema` combinado com `--output-format stream-json`, ao vivo: achado
+   real — a CLI usa uma tool call interna (`StructuredOutput`), e o evento final
+   `type:"result"` traz um campo novo `structured_output` (já um dict parseado),
+   além do `result` (string, como no modo sem streaming). `_extract_structured`
+   prefere o campo novo.
+2. Uma segunda mensagem escrita no stdin **enquanto a primeira ainda está sendo
+   processada** de fato interrompe/redireciona o agente — testado direto na CLI
+   ("conte até 5" interrompido por "pare, responda X") e **depois, de novo,
+   através do plugin reescrito de verdade** (script real, ver abaixo).
+
+**Implementação** (`plugins/claude_code_runner.py` reescrito + 2 endpoints novos em
+`http_api.py`): `session_log_path` agora escrito incrementalmente; arquivo irmão
+`<step>.instrucoes.jsonl` observado por uma thread de polling que repassa linhas
+novas pro stdin do processo vivo; `GET /runs/{chain_name}/stream` (SSE, tail do log)
+e `POST /runs/{chain_name}/instrucoes` (append no arquivo) em `http_api.py`,
+resolvendo a etapa ativa só via `.db`+YAML — sem depender de `ServerState`, então
+funciona igual pra execuções do terminal (requisito NFR-1, testado explicitamente:
+todos os testes de streaming semeiam o run via `SqliteStateStore` direto, nunca via
+`ServerState.trigger`).
+
+**Smoke-test manual real** (não só fakes): rodei o plugin reescrito de verdade
+(sem mocks — `Popen` real, `claude` real) contra um repositório git descartável
+(sem remoto, pra garantir que nenhum `git push` real pudesse acontecer) e o
+servidor MCP real de `samples/docs-site`. Escrevi uma instrução de interrupção real
+no arquivo `.instrucoes.jsonl` 4 segundos depois de iniciar — **o `summary` final
+retornado pelo plugin foi literalmente "PAROU"**, a palavra exata pedida na
+instrução, confirmando que o mecanismo funciona de ponta a ponta através do código
+real, não só do fake de teste. Nenhuma mudança indevida no repositório descartável
+(`git log` continua só com o commit inicial).
+
+**1 teste removido por ser redundante/perigoso**: uma tentativa inicial de testar
+AC-10 abrindo um SSE stream sem nunca completar a etapa **travou o pytest** (o
+`TestClient`/ASGI transport do FastAPI espera o generator terminar antes de devolver
+controle do `with client.stream(...)`) — matei o processo manualmente e removi o
+teste, já que AC-10 já estava coberto pelos testes de AC-06/AC-08 (que já semeiam o
+run sem passar por `ServerState`).
+
+`85/85 testes passando` (8 no plugin reescrito, 4 nos endpoints novos). `init.sh`
+limpo.
 
 ## Sessão 2026-09-04 (3) — ADR-004: API HTTP e monitoria (workflow serve)
 

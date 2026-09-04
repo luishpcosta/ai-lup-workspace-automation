@@ -1,45 +1,57 @@
-"""Claude Code Runner plugin (ADR-002, AT-02/AT-03; AC-04..AC-08).
+"""Claude Code Runner plugin (ADR-002, AT-02/AT-03; ADR-005, AT-01..AT-03).
 
-Invokes the `claude` CLI headless (`-p`/`--print`), parametrized by
-`params.modo` (`"coding"` or `"review"`). Invocation verified against the
-installed CLI (`claude 2.1.260`, `claude --help`) — see
-`adr/ADR-002-plugins-poc-pipeline-sdd.md`, "Invocação verificada da CLI":
+Invokes the `claude` CLI as a **long-lived process** (`Popen`, stdin/stdout kept
+open) using `--input-format stream-json --output-format stream-json --verbose`,
+parametrized by `params.modo` (`"coding"` or `"review"`). This replaced the
+ADR-002 one-shot `subprocess.run(capture_output=True)` invocation — the plugin's
+external contract (`params`/`output`, `TransientError` semantics) is unchanged.
 
-- `--mcp-config <path> --strict-mcp-config`: always points explicitly at the
-  Docusaurus MCP config; never relies on project auto-discovered `.mcp.json`
-  (which stays "Pending approval" — unusable headless).
-- `--output-format json --json-schema <schema>`: structured result, so
-  `summary`/`docs_referenced` don't need free-text parsing. Verified live
-  (real `claude -p` call against the sample MCP server, see
-  `progress.md`): the outer envelope's `result` field is a **JSON-encoded
-  string** matching the schema (`{"result": "{\"summary\": ...}", ...}`),
-  not a nested object — `_parse_result` below relies on exactly this shape.
-- `--permission-mode bypassPermissions`: **not** `acceptEdits` +
-  `--permission-prompts none` — that combination was tried first and
-  verified *not* to work: it denies MCP tool calls outright
-  (`permission_denials` in the CLI's own JSON output), since `acceptEdits`
-  only pre-approves file edits, not arbitrary tool use, and
-  `--permission-prompts none` denies anything needing a decision instead of
-  approving it. `bypassPermissions` is the mode verified to actually let a
-  headless run call MCP tools.
-- Review mode never passes `-r/--resume`, `-c/--continue` or `--fork-session`
-  — that absence is what guarantees a fresh session/context window.
+Everything below is verified against a real, live `claude` invocation this
+session (`claude 2.1.260`), not assumed — see `adr/ADR-005-stream-interacao-agente.md`:
 
-`session_log_path` is deterministic (`<workspace_path>/.workflow-logs/<run_id>/
-<step_name>.log`), not something only returned in `output` — the file is
-written in a `finally` block, so it exists even when the plugin raises
-(AC-08), which a normal `output` return can't guarantee (ADR-001: failure =
-exception, no structured output).
+- `--mcp-config <path> --strict-mcp-config`: same as ADR-002 — never relies on
+  project auto-discovered `.mcp.json`.
+- `--output-format json --json-schema <schema>` in ADR-002 became
+  `--output-format stream-json` here; the initial prompt is sent as the first
+  stdin line (`{"type":"user","message":{"role":"user","content":...}}`), not a
+  CLI positional argument — `--input-format stream-json` reads the whole
+  conversation from stdin, not from argv.
+- `--verbose` is *required* alongside `--output-format stream-json` in `--print`
+  mode (the CLI errors otherwise).
+- The final `type:"result"` event, when `--json-schema` is set, carries the
+  schema-conforming payload twice: `result` (JSON-encoded string, as in ADR-002)
+  and a new `structured_output` field — already a parsed object. `_extract_structured`
+  prefers `structured_output`.
+- Verified live: writing a **second** stdin message while the first is still
+  being processed genuinely steers the agent mid-session (tested: "count slowly
+  to 5" interrupted by "stop, just say X" — the agent actually stopped and
+  complied). This is what `_poll_instructions` automates.
+- Closing stdin (no more messages) is what ends the process — a stream-json
+  session does not self-terminate after one turn. `_run_streaming_session`
+  closes stdin as soon as it sees the `result` event for the current turn.
 
-Both modes carry `context.input` forward into their own `output` (merged,
-own keys win) — `workspace_path` has no other param through which to reach
-the review step two hops later (via Git/PR, then Shell/Script Runner).
+`session_log_path` (deterministic, `<workspace_path>/.workflow-logs/<run_id>/
+<step_name>.log`, from ADR-002) is now written **incrementally** — one line per
+event received — instead of only in a `finally` block, so the ADR-005 SSE
+endpoint (`http_api.py`, `GET /runs/{chain_name}/stream`) can `tail -f` it live.
+It is still guaranteed to exist even on failure, for the same reason as before:
+this contract survives exceptions because it's a deterministic path, not
+something only present in a successful `output`.
+
+A sibling file, `<step_name>.instrucoes.jsonl` (also a deterministic path, same
+directory), is polled by a background thread for new lines while the session is
+active; each new line is forwarded to the live process's stdin as a user
+message (ADR-005, RF-03). `POST /runs/{chain_name}/instrucoes` (http_api.py)
+just appends to this file — the mechanism is file-based, not in-memory, so it
+works the same whether the run was started by `serve`, `run`, or `run-many`
+(ADR-005, RNF-01).
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -60,15 +72,29 @@ _REVIEW_SCHEMA = {
     "required": ["summary"],
 }
 
-#: exit-code!=0 whose stderr matches one of these is treated as retriable;
+#: exit-code!=0 whose output matches one of these is treated as retriable;
 #: anything else is a permanent failure.
-_TRANSIENT_STDERR_PATTERNS = ("rate_limit", "econnreset", "timeout", "network", "overloaded")
+_TRANSIENT_PATTERNS = ("rate_limit", "econnreset", "timeout", "network", "overloaded")
+
+#: how often the instructions-file poller checks for new content (ADR-005, AC-04).
+_DEFAULT_INSTRUCTION_POLL_INTERVAL = 0.2
+
+#: how long to wait for the process to exit after we close its stdin, before
+#: giving up and killing it — a stream-json session should wrap up quickly once
+#: it knows no more input is coming.
+_SHUTDOWN_TIMEOUT_SECONDS = 30
 
 
 class ClaudeCodeRunnerPlugin(Plugin):
-    def __init__(self, run_command=subprocess.run, claude_bin: str = "claude"):
-        self._run_command = run_command
+    def __init__(
+        self,
+        popen_factory=subprocess.Popen,
+        claude_bin: str = "claude",
+        instruction_poll_interval: float = _DEFAULT_INSTRUCTION_POLL_INTERVAL,
+    ):
+        self._popen_factory = popen_factory
         self._claude_bin = claude_bin
+        self._instruction_poll_interval = instruction_poll_interval
 
     def run(self, context: PluginContext) -> Any:
         modo = context.params.get("modo")
@@ -93,23 +119,15 @@ class ClaudeCodeRunnerPlugin(Plugin):
         mcp_config_path = params["mcp_config_path"]
 
         log_path = self._session_log_path(workdir, context.run_id, context.step_name)
-        cmd = [
-            self._claude_bin,
-            "-p",
-            self._coding_prompt(historia_id),
-            "--mcp-config",
-            mcp_config_path,
-            "--strict-mcp-config",
-            "--output-format",
-            "json",
-            "--json-schema",
-            json.dumps(_CODING_SCHEMA),
-            "--permission-mode",
-            "bypassPermissions",
-        ]
-        returncode, stdout, stderr = self._invoke_cli(cmd, workdir, log_path)
-        self._raise_if_failed(returncode, stderr, log_path)
-        result = self._parse_result(stdout, log_path)
+        instructions_path = self._instructions_path(workdir, context.run_id, context.step_name)
+        cmd = self._build_cmd(mcp_config_path, _CODING_SCHEMA)
+        prompt = self._coding_prompt(historia_id)
+
+        returncode, lines = self._run_streaming_session(
+            cmd, workdir, log_path, instructions_path, prompt
+        )
+        self._raise_if_failed(returncode, lines, log_path)
+        result = self._extract_structured(self._find_result_event(lines), log_path)
 
         return {
             **input_data,
@@ -153,26 +171,15 @@ class ClaudeCodeRunnerPlugin(Plugin):
         mcp_config_path = params["mcp_config_path"]
 
         log_path = self._session_log_path(workdir, context.run_id, context.step_name)
-        # Deliberately no -r/--resume, -c/--continue or --fork-session: this is
-        # what makes the review run in a fresh session/context window, per the
-        # scenario's requirement (no reuse of the coding session's history).
-        cmd = [
-            self._claude_bin,
-            "-p",
-            self._review_prompt(skill, pr_ref),
-            "--mcp-config",
-            mcp_config_path,
-            "--strict-mcp-config",
-            "--output-format",
-            "json",
-            "--json-schema",
-            json.dumps(_REVIEW_SCHEMA),
-            "--permission-mode",
-            "bypassPermissions",
-        ]
-        returncode, stdout, stderr = self._invoke_cli(cmd, workdir, log_path)
-        self._raise_if_failed(returncode, stderr, log_path)
-        result = self._parse_result(stdout, log_path)
+        instructions_path = self._instructions_path(workdir, context.run_id, context.step_name)
+        cmd = self._build_cmd(mcp_config_path, _REVIEW_SCHEMA)
+        prompt = self._review_prompt(skill, pr_ref)
+
+        returncode, lines = self._run_streaming_session(
+            cmd, workdir, log_path, instructions_path, prompt
+        )
+        self._raise_if_failed(returncode, lines, log_path)
+        result = self._extract_structured(self._find_result_event(lines), log_path)
 
         return {
             "status": "success",
@@ -188,58 +195,164 @@ class ClaudeCodeRunnerPlugin(Plugin):
 
     # -- shared plumbing -------------------------------------------------
 
+    def _build_cmd(self, mcp_config_path: str, schema: dict) -> list[str]:
+        # Deliberately no -r/--resume, -c/--continue or --fork-session: every
+        # call is a fresh session/context window (verified live — see module
+        # docstring). No positional prompt either: --input-format stream-json
+        # reads the whole conversation from stdin.
+        return [
+            self._claude_bin,
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--mcp-config",
+            mcp_config_path,
+            "--strict-mcp-config",
+            "--json-schema",
+            json.dumps(schema),
+            "--permission-mode",
+            "bypassPermissions",
+        ]
+
     def _session_log_path(self, workspace_path: Any, run_id: str, step_name: str) -> Path:
         return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.log"
 
-    def _invoke_cli(self, cmd: list[str], cwd: Any, log_path: Path) -> tuple[int, str, str]:
-        """Run the CLI, writing the transcript to log_path even on failure (AC-08)."""
-        stdout, stderr, returncode = "", "", None
-        try:
-            result = self._run_command(cmd, cwd=str(cwd), capture_output=True, text=True)
-            stdout = result.stdout or ""
-            stderr = result.stderr or ""
-            returncode = result.returncode
-            return returncode, stdout, stderr
-        finally:
-            self._write_log(log_path, cmd, stdout, stderr)
+    def _instructions_path(self, workspace_path: Any, run_id: str, step_name: str) -> Path:
+        return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.instrucoes.jsonl"
 
-    def _write_log(self, log_path: Path, cmd: list[str], stdout: str, stderr: str) -> None:
+    def _run_streaming_session(
+        self, cmd: list[str], cwd: Any, log_path: Path, instructions_path: Path, prompt: str
+    ) -> tuple[int, list[str]]:
+        """Runs the CLI as a long-lived process, writing session_log_path
+        incrementally (AC-02) and forwarding new instructions-file lines to its
+        stdin while active (AC-04). Closes stdin as soon as the current turn's
+        `result` event arrives — a stream-json session otherwise waits
+        indefinitely for more input (verified live).
+        """
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text(
-            f"$ {' '.join(cmd)}\n\n=== stdout ===\n{stdout}\n\n=== stderr ===\n{stderr}\n",
-            encoding="utf-8",
+        proc = self._popen_factory(
+            cmd,
+            cwd=str(cwd),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        stop_polling = threading.Event()
+        poller = threading.Thread(
+            target=self._poll_instructions,
+            args=(proc, instructions_path, stop_polling),
+            daemon=True,
+        )
+        poller.start()
+
+        lines: list[str] = []
+        try:
+            self._send_message(proc, prompt)
+            with open(log_path, "w", encoding="utf-8") as log_file:
+                for line in proc.stdout:
+                    log_file.write(line)
+                    log_file.flush()
+                    lines.append(line)
+                    if self._is_result_event(line):
+                        stop_polling.set()
+                        self._close_stdin(proc)
+        finally:
+            stop_polling.set()
+            try:
+                returncode = proc.wait(timeout=_SHUTDOWN_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                returncode = proc.wait()
+        return returncode, lines
+
+    def _send_message(self, proc: Any, content: str) -> None:
+        proc.stdin.write(
+            json.dumps({"type": "user", "message": {"role": "user", "content": content}}) + "\n"
+        )
+        proc.stdin.flush()
+
+    def _close_stdin(self, proc: Any) -> None:
+        try:
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+    def _is_result_event(self, line: str) -> bool:
+        try:
+            return json.loads(line).get("type") == "result"
+        except (json.JSONDecodeError, AttributeError):
+            return False
+
+    def _poll_instructions(
+        self, proc: Any, instructions_path: Path, stop_event: threading.Event
+    ) -> None:
+        last_size = 0
+        while not stop_event.is_set():
+            if stop_event.wait(self._instruction_poll_interval):
+                return
+            if not instructions_path.exists():
+                continue
+            try:
+                data = instructions_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if len(data) <= last_size:
+                continue
+            new_content = data[last_size:]
+            last_size = len(data)
+            for instruction_line in new_content.splitlines():
+                instruction_line = instruction_line.strip()
+                if not instruction_line:
+                    continue
+                try:
+                    self._send_message(proc, instruction_line)
+                except (BrokenPipeError, OSError, ValueError):
+                    return  # process already closed stdin / exited
+
+    def _find_result_event(self, lines: list[str]) -> dict | None:
+        for line in reversed(lines):
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and payload.get("type") == "result":
+                return payload
+        return None
+
+    def _extract_structured(self, result_event: dict | None, log_path: Path) -> dict:
+        if result_event is None:
+            raise RuntimeError(f"claude CLI produced no result event: see {log_path}")
+        structured = result_event.get("structured_output")
+        if isinstance(structured, dict):
+            return structured
+        result_field = result_event.get("result")
+        if isinstance(result_field, str):
+            try:
+                parsed = json.loads(result_field)
+            except json.JSONDecodeError:
+                return {"summary": result_field}
+            if isinstance(parsed, dict):
+                return parsed
+        raise RuntimeError(
+            f"claude CLI result event has no usable structured output: see {log_path}"
         )
 
-    def _raise_if_failed(self, returncode: int | None, stderr: str, log_path: Path) -> None:
-        if returncode == 0:
-            return
-        lowered = stderr.lower()
-        if any(pattern in lowered for pattern in _TRANSIENT_STDERR_PATTERNS):
-            raise TransientError(
-                f"claude CLI failed transiently (exit {returncode}): see {log_path}"
-            )
-        raise RuntimeError(f"claude CLI failed (exit {returncode}): see {log_path}")
-
-    def _parse_result(self, stdout: str, log_path: Path) -> dict:
-        try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"claude CLI returned non-JSON output: see {log_path}") from exc
-
-        result = payload
-        if isinstance(payload, dict) and "result" in payload:
-            inner = payload["result"]
-            if isinstance(inner, str):
-                try:
-                    result = json.loads(inner)
-                except json.JSONDecodeError:
-                    result = {"summary": inner}
-            elif isinstance(inner, dict):
-                result = inner
-
-        if not isinstance(result, dict):
-            raise RuntimeError(f"claude CLI returned unexpected JSON shape: see {log_path}")
-        return result
+    def _raise_if_failed(self, returncode: int, lines: list[str], log_path: Path) -> None:
+        if returncode != 0:
+            joined = "".join(lines).lower()
+            if any(pattern in joined for pattern in _TRANSIENT_PATTERNS):
+                raise TransientError(
+                    f"claude CLI failed transiently (exit {returncode}): see {log_path}"
+                )
+            raise RuntimeError(f"claude CLI failed (exit {returncode}): see {log_path}")
+        result_event = self._find_result_event(lines)
+        if result_event is not None and result_event.get("is_error"):
+            raise RuntimeError(f"claude CLI reported an error result: see {log_path}")
 
 
 PLUGIN = ClaudeCodeRunnerPlugin
