@@ -22,7 +22,7 @@ até que passe a ter código.
 
 ## Planejamento (to-be)
 
-- **motor-workflow**: [specs](./backend/specs/) — spec/plan/tasks por feature
+- **motor-workflow**: [specs](./backend/docs/specs/) — spec/plan/tasks por feature
   (harness SDD, `backend/AGENTS.md`), uma pasta por feature numerada (`001-...` a
   `005-...`, todas implementadas).
 - **frontend**: pasta reservada (`./frontend/`), sem contexto/ADR/specs ainda —

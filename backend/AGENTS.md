@@ -12,7 +12,7 @@ Before doing anything:
 2. **Read this file** completely
 3. **Read `constitution.md`** — these are non-negotiable project principles
 4. **Run `./init.sh`** to verify environment health
-5. **Check feature status**: look at the `**Phase:**` line at the top of each `specs/NNN-slug/spec.md` (or `plan.md`/`tasks.md`)
+5. **Check feature status**: look at the `**Phase:**` line at the top of each `docs/specs/NNN-slug/spec.md` (or `plan.md`/`tasks.md`)
 6. **Review recent commits** with `git log --oneline -5`
 
 If `init.sh` fails, repair that before adding new scope.
@@ -23,10 +23,10 @@ Advance exactly **one feature at a time** through these phases. Each phase has a
 
 | Phase | You produce | Gate to leave |
 |---|---|---|
-| **Specify** | `specs/NNN-slug/spec.md` | Every requirement has a testable acceptance criterion (AC-ID); scope and edge cases stated |
+| **Specify** | `docs/specs/NNN-slug/spec.md` | Every requirement has a testable acceptance criterion (AC-ID); scope and edge cases stated |
 | **Clarify** | clarifications resolved in spec.md | Zero `[NEEDS CLARIFICATION]` markers remain |
-| **Plan** | `specs/NNN-slug/plan.md` | Every functional requirement is addressed; decisions consistent with `constitution.md` |
-| **Tasks** | `specs/NNN-slug/tasks.md` | Every AC has ≥1 task **and** every task references an AC |
+| **Plan** | `docs/specs/NNN-slug/plan.md` | Every functional requirement is addressed; decisions consistent with `constitution.md` |
+| **Tasks** | `docs/specs/NNN-slug/tasks.md` | Every AC has ≥1 task **and** every task references an AC |
 | **Implement** | code + tests | One task at a time; never start before the Tasks gate passes |
 | **Verify** | evidence in `tasks.md`'s Evidence column and `progress.md` | Every AC has recorded passing evidence |
 
@@ -51,7 +51,7 @@ Update the `**Phase:**` line at the top of the feature's `spec.md`/`plan.md`/`ta
 ## Required Artifacts
 
 - `constitution.md` — project principles/invariants
-- `specs/NNN-slug/{spec,plan,tasks}.md` — per-feature documents; each carries its own `**Phase:**`, and `tasks.md` carries per-task Status/Evidence
+- `docs/specs/NNN-slug/{spec,plan,tasks}.md` — per-feature documents; each carries its own `**Phase:**`, and `tasks.md` carries per-task Status/Evidence
 - `progress.md` — session continuity log
 - `init.sh` — verification
 

@@ -23,7 +23,7 @@ Non-negotiable principles for this repository. Plans and code must comply; confl
 ## Quality Bar
 
 - Verification command(s) that must pass: `python -m pytest`, `python -m compileall .`, `ruff check .`, `ruff format --check .` (ver `init.sh`).
-- Coverage / review expectations: toda AC de `specs/001-motor-workflow-plugins/spec.md` precisa de evidência de teste antes de a feature ser marcada `done` em `tasks.md`.
+- Coverage / review expectations: toda AC de `docs/specs/001-motor-workflow-plugins/spec.md` precisa de evidência de teste antes de a feature ser marcada `done` em `tasks.md`.
 
 ## Amendments
 
