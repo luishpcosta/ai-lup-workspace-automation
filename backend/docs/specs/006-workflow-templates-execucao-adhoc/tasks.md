@@ -21,13 +21,15 @@
 | T-6 | `POST /runs/from-template` + `ServerState.trigger_from_template` (materializa YAML em `_generated-configs/`, delega para `trigger()` existente) (ADR-007-AT-05) (depende de T-3, T-5) | AC-10, AC-11, AC-12, AC-13 | done | `tests/test_http_api_templates.py::test_post_runs_from_template_dispatches_and_completes_ac04`, `::test_post_runs_from_template_rejects_missing_required_param_ac05`, `::test_post_runs_from_template_rejects_unknown_template_ac06`, `::test_two_dispatches_of_the_same_template_never_collide_in_chain_name_ac07` |
 | T-7 | `adapters/cli.py`: flags `--workflow-templates-dir`/`--local-repos-root` em `serve` (habilita configuração de T-5/T-6) | AC-08, AC-09 | done | `src/workflow_engine/adapters/cli.py` (`serve_parser`); coberto indiretamente por T-5 (mesmo caminho de config repassado por `cmd_serve`) |
 | T-8 | `plugins/claude_code_runner.py`: modo `investigar` (`workspace_path` de `params`/`input`, prompt anti-branch/commit/PR, schema `relatorio`/`docs_consultados`) (ADR-007-AT-06) | AC-14, AC-15, AC-16 | done | `tests/test_claude_code_runner_plugin.py::test_investigar_mode_reads_workspace_path_from_params_ac_investigar_01`, `::test_investigar_mode_prefers_workspace_path_from_input_when_present`, `::test_investigar_mode_without_workspace_path_raises` |
-| T-9 | `config/mcp-docs-proxy.json`, `config/workflow_templates/investigar-impacto.yaml`, `config/workflow_templates/implementar-historia-sdd.yaml` (regressão: mesmos `steps:` de `examples/implementar-historia-sdd.yaml`) | AC-01, AC-17 | done | Arquivos criados; `implementar-historia-sdd.yaml` verificado carregável por `YamlJsonChainLoader` (mesma estrutura `steps:` do example já coberto por smoke-test da feature `002`) — ver `progress.md` para verificação manual ponta a ponta pendente |
+| T-9 | `config/mcp-docs-proxy.json`, `config/workflow_templates/investigar-impacto.yaml`, `config/workflow_templates/implementar-historia-sdd.yaml` (regressão: mesmos `steps:` de `examples/implementar-historia-sdd.yaml`) | AC-01, AC-17 | done | Arquivos criados; **verificado ponta a ponta de verdade** (não só smoke-test): `docker build -t docs-mcp-proxy`, `workflow serve` real + `POST /runs/from-template` real contra `ai-lup-poc-target-cli` real — `investigar-impacto` completou com relatório/docs consultados corretos, e uma segunda rodada confirmou stream SSE + instrução ao vivo funcionando de verdade (`relatorio` final = "PAROU..." após instrução real via `/instrucoes`). Ver `progress.md`, seção "Verificação real ponta a ponta". |
+| T-10 | 3 bugs reais achados na verificação ponta a ponta e corrigidos: `mcp_config_path` relativo resolvido contra o repo-alvo em vez do motor; `/stream`/`/instrucoes` não resolviam a etapa ativa do modo `investigar` (só olhavam `input`, nunca `params`); `Popen` sem `encoding="utf-8"` quebrando (e arriscando corromper silenciosamente) texto não-ASCII no Windows (depende de T-6, T-8) | AC-10, AC-14, AC-16 (reforço) | done | `tests/test_claude_code_runner_plugin.py::test_relative_mcp_config_path_is_resolved_against_engine_cwd_not_workspace`, `::test_popen_is_pinned_to_utf8_not_the_platform_default_encoding`; `tests/test_http_api_streaming.py::test_stream_resolves_workspace_path_from_step_params_for_investigar_modo`, `::test_post_instruction_resolves_workspace_path_from_step_params_for_investigar_modo` |
 
 Status values: `todo` → `doing` → `done`.
 
-Full suite: `python -m pytest -q` → **109 passed** (2026-09-06, era 87 antes desta
-feature). `python -m compileall .` → exit 0. `ruff check .` → All checks passed.
-`ruff format --check .` → 85 files already formatted.
+Full suite: `python -m pytest -q` → **113 passed** (2026-09-06, era 87 antes desta
+feature; 109 antes da verificação ponta a ponta real). `python -m compileall .` → exit
+0. `ruff check .` → All checks passed. `ruff format --check .` → 90 files already
+formatted.
 
 ## Coverage Check
 

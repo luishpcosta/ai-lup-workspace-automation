@@ -266,6 +266,16 @@ class ClaudeCodeRunnerPlugin(Plugin):
         # call is a fresh session/context window (verified live — see module
         # docstring). No positional prompt either: --input-format stream-json
         # reads the whole conversation from stdin.
+        #
+        # mcp_config_path is resolved to an absolute path *here*, against this
+        # process's own cwd (the motor's, e.g. `backend/`) — never left relative.
+        # The `claude` subprocess itself runs with cwd=workspace_path (the
+        # target repo being investigated/implemented), so a relative path would
+        # otherwise be resolved against the *wrong* directory: the MCP config is
+        # a motor artifact (`config/*.json`), not something that lives inside
+        # the target repo. Found for real running the `investigar` mode (ADR-007)
+        # against a target repo whose workspace_path never had a `config/` dir.
+        resolved_mcp_config_path = str(Path(mcp_config_path).resolve())
         return [
             self._claude_bin,
             "-p",
@@ -275,7 +285,7 @@ class ClaudeCodeRunnerPlugin(Plugin):
             "stream-json",
             "--verbose",
             "--mcp-config",
-            mcp_config_path,
+            resolved_mcp_config_path,
             "--strict-mcp-config",
             "--json-schema",
             json.dumps(schema),
@@ -299,6 +309,12 @@ class ClaudeCodeRunnerPlugin(Plugin):
         indefinitely for more input (verified live).
         """
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        # encoding="utf-8" is required, not cosmetic: `claude` always emits/reads
+        # UTF-8 on stdout/stdin, but `text=True` alone falls back to
+        # locale.getpreferredencoding() — a single-byte Windows codepage in this
+        # environment, which raises UnicodeDecodeError on real (non-ASCII) output
+        # and would silently mangle the Portuguese-accented prompts sent via
+        # stdin otherwise. Found running the `investigar` modo for real (ADR-007).
         proc = self._popen_factory(
             cmd,
             cwd=str(cwd),
@@ -306,6 +322,7 @@ class ClaudeCodeRunnerPlugin(Plugin):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
             bufsize=1,
         )
         stop_polling = threading.Event()

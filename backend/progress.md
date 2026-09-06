@@ -51,10 +51,57 @@ untracked, foi commitado lá (repo git separado) para viajar com um clone novo �
 
 `109/109 testes passando` (22 novos: 5 no registry, 5 na aplicação, 7 na API HTTP, 3 no
 modo `investigar`, 2 no fix do Chain Loader). `ruff check`/`format` limpos,
-`compileall` ok. **Não verificado ainda nesta sessão**: execução real ponta a ponta do
-template `investigar-impacto` contra `ai-lup-poc-target-cli` de verdade (precisa de
-`docker build -t docs-mcp-proxy ./docs-mcp-proxy` local antes) — próximo passo sugerido,
-não bloqueante para o gate de Verify (toda AC já tem evidência automatizada).
+`compileall` ok.
+
+### Verificação real ponta a ponta (mesma sessão, a pedido do usuário) — 3 bugs reais achados e corrigidos
+
+`docker build -t docs-mcp-proxy ./docs-mcp-proxy` real; smoke-test direto do `claude`
+CLI com `--mcp-config config/mcp-docs-proxy.json` confirmou o MCP funcionando contra
+`doc-repo-example` de verdade (12 docs reais listados via `list_all`). Depois, `workflow
+serve` real (porta 8010, `--local-repos-root` apontando pro diretório-pai) disparando
+`POST /runs/from-template` de verdade contra o `ai-lup-poc-target-cli` real:
+
+1. **`mcp_config_path` relativo resolvido no diretório errado**: `./config/
+   mcp-docs-proxy.json` é resolvido pelo SO relativo ao `cwd` do processo `claude`
+   spawnado (que é `workspace_path`, o repo-alvo) — não ao `cwd` do motor. A primeira
+   tentativa falhou com "MCP config file not found" dentro do `ai-lup-poc-target-cli`.
+   Os exemplos antigos (`examples/implementar-historia-sdd.yaml`) sempre tiveram esse
+   mesmo problema latente; só nunca foi notado porque as execuções reais anteriores
+   (`samples/*.yaml`, feature `002`) usavam caminho absoluto, não o relativo do exemplo.
+   **Corrigido**: `_build_cmd` agora resolve `mcp_config_path` via `Path(...).resolve()`
+   (contra o cwd do motor) antes de montar o comando — beneficia `coding`/`review`
+   também, não só `investigar`. Teste de regressão novo.
+2. **`/stream`/`/instrucoes` nunca resolviam a etapa ativa no modo `investigar`**:
+   `_resolve_active_claude_step` só olhava `workspace_path` no `input` (carry-forward)
+   — o modo `investigar` não tem etapa anterior, então nunca tinha `input`. Achado
+   batendo o SSE stream de verdade contra uma execução `investigar` real rodando
+   (409 `not_streamable` com a etapa genuinamente `running`). **Corrigido**: fallback
+   para `step_def.params.get("workspace_path")`, mesma ordem que o próprio plugin já
+   usa. 2 testes de regressão novos.
+3. **`Popen(..., text=True)` sem `encoding="utf-8"`**: no Windows, isso cai no
+   codepage padrão do sistema (não UTF-8) tanto pra ler stdout quanto pra escrever
+   stdin — uma resposta real mais longa quebrou com `UnicodeDecodeError` no meio da
+   sessão. Mais grave: os prompts em português (`_coding_prompt`/`_review_prompt`/
+   `_investigar_prompt`, todos com acentos) também são escritos via esse mesmo stdin —
+   sem o fix, ficam sujeitos ao mesmo risco de corrupção silenciosa, não só de crash.
+   **Corrigido**: `encoding="utf-8"` explícito no `Popen`. Teste de regressão novo.
+
+**Verificado de verdade depois dos 3 fixes** (não só teste unitário): reiniciei o
+`workflow serve`, disparei `investigar-impacto` de novo contra o `ai-lup-poc-target-cli`
+real — completou com `relatorio`/`docs_consultados` corretos, cruzando de fato o
+conteúdo de `sdd/1-CLAUDE` buscado via MCP. Rodei uma segunda vez com um prompt mais
+longo ("conte de 1 a 20 devagar"), abri o SSE stream de verdade (200, dados reais
+chegando) e mandei uma instrução ao vivo via `POST /instrucoes` ("pare e responda
+PAROU") — o `relatorio` final foi literalmente "PAROU — execução interrompida a pedido
+do usuário", confirmando que ADR-005 (stream + steering ao vivo) funciona de ponta a
+ponta com o modo novo, não só por reuso de código não testado. Confirmado via `git
+status`/`git log` no `ai-lup-poc-target-cli` real, nas 3 rodadas: sempre `main`, sempre
+`nothing to commit` (além de `.workflow-logs/`, removido depois) — nenhuma branch,
+commit ou PR criada, garantia de somente-leitura do modo `investigar` validada de
+verdade, não só por design.
+
+`113/113 testes passando` (3 novos: fix do `mcp_config_path`, 2 do fallback de
+`workspace_path` em `/stream`/`/instrucoes`). `ruff`/`compileall` limpos.
 
 **Nota (mudança pequena, feita pela feature `006-frontend-painel-controle` do contexto
 `frontend`)**: `CORSMiddleware` adicionado a `build_app()` em `http_api.py` —

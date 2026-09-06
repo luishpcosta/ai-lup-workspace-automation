@@ -342,6 +342,12 @@ def _resolve_active_claude_step(watch_dir: Path, chain_name: str) -> tuple[str, 
     input_data = json.loads(input_json) if input_json else {}
     workspace_path = input_data.get("workspace_path") if isinstance(input_data, dict) else None
     if not workspace_path:
+        # ADR-007: the `investigar` modo has no preceding workspace_setup step, so
+        # there is no carry-forward input — workspace_path lives in the step's own
+        # params instead (same fallback order as claude_code_runner.py itself).
+        # Found running the investigar modo for real against a live SSE stream.
+        workspace_path = step_def.params.get("workspace_path")
+    if not workspace_path:
         return None
     return workspace_path, run_id, step_name
 
