@@ -291,6 +291,85 @@ def test_stdin_closed_after_result_event(tmp_path):
     assert factory.procs[0].stdin.closed
 
 
+def test_investigar_mode_reads_workspace_path_from_params_ac_investigar_01(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [
+        system_line(),
+        result_line({"relatorio": "sem impacto relevante", "docs_consultados": ["005-x"]}),
+    ]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "investigue o impacto de X",
+            "docs_referenced": ["005-x"],
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="investigar",
+    )
+
+    output = plugin.run(context)
+
+    assert output["status"] == "success"
+    assert output["relatorio"] == "sem impacto relevante"
+    assert output["docs_consultados"] == ["005-x"]
+    first_message = json.loads(factory.procs[0].stdin.lines[0])
+    content = first_message["message"]["content"]
+    assert "investigue o impacto de X" in content
+    assert "005-x" in content
+    # read-only: prompt explicitly forbids branch/commit/PR, not just omits them
+    assert "não crie branch" in content.lower()
+    assert "não abra pr" in content.lower()
+
+
+def test_investigar_mode_prefers_workspace_path_from_input_when_present(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [result_line({"relatorio": "ok", "docs_consultados": []})]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "investigue",
+            "workspace_path": "/should/not/be/used",
+        },
+        input_data={"workspace_path": str(workdir)},
+        step_name="investigar",
+    )
+
+    plugin.run(context)
+
+    expected_log = workdir / ".workflow-logs" / "run-1" / "investigar.log"
+    assert expected_log.exists()
+
+
+def test_investigar_mode_without_workspace_path_raises(tmp_path):
+    factory = FakePopenFactory([result_line({"relatorio": "ok", "docs_consultados": []})])
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "investigue",
+        },
+        input_data=None,
+        step_name="investigar",
+    )
+
+    with pytest.raises(ValueError, match="workspace_path"):
+        plugin.run(context)
+    assert factory.calls == []
+
+
 def test_forwards_pending_instruction_to_stdin_ac04(tmp_path):
     workdir = tmp_path / "ws"
     workdir.mkdir()

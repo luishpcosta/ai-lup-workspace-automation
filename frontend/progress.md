@@ -2,10 +2,44 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-04
-**Active Feature:** 006-frontend-painel-controle — Painel de Controle Frontend v1 (REST/SSE) — Verify, `done`
+**Last Updated:** 2026-09-06
+**Active Feature:** 007-selecao-template-execucao — Disparo por template, specs remotas e repositórios locais — Verify, `done`
 **Active SDD Phase:** Verify
-**Pending Gate:** Nenhum. Todas as 13 ACs (AC-01 a AC-13) implementadas e verificadas — ver `docs/specs/006-frontend-painel-controle/tasks.md`.
+**Pending Gate:** Nenhum. Todas as 10 ACs (AC-01 a AC-10) implementadas e verificadas — ver `docs/specs/007-selecao-template-execucao/tasks.md`.
+
+## Sessão 2026-09-06 — ADR-007 (contexto `motor-workflow`, `afeta: [frontend]`): disparo por template
+
+Redesenho pedido pelo usuário: o disparo deixa de ser um texto livre resolvido por
+convenção de nome de arquivo (`configDir`/`resolveConfigPath.js`, ADR-006) e passa a
+ser por **workflow (template)** — o backend expõe `GET /workflows` com o schema de
+parâmetros de cada um, e o formulário de disparo (`TriggerForm.jsx`) se monta
+dinamicamente a partir disso (`DynamicParamsForm.jsx`), sem hardcode de nenhum
+template específico. Dois componentes novos resolvem os dois tipos de campo "fonte
+externa": `RepoPicker.jsx` (repositórios locais, `GET /workspace/repos`) e
+`SpecPicker.jsx` (specs remotas, fetch **direto do browser** em
+`${specsBaseUrl}/docs-index.json` — decisão do usuário, sem proxy no backend; novo
+`lib/specsClient.js`, deliberadamente fora de `apiClient.js` por falar com uma origem
+diferente do backend do motor).
+
+`configDir` saiu da `SettingsScreen`/`config.js`, substituído por `specsBaseUrl`;
+`resolveConfigPath.js` e seu teste foram removidos (órfãos — nada mais resolvia
+ID→path). `createRun(configPath)` também saiu de `apiClient.js` (sem chamador),
+substituído por `createRunFromTemplate(templateId, params)`.
+`RunsList`/`RunDetail`/`StreamPanel`/`InstructionBox`/`App.jsx` **não mudaram** —
+`onDispatched`/`refreshToken` continuam exatamente como estavam.
+
+**Decisão de escopo registrada, não decidida sozinho**: o disparo em lote (múltiplos
+IDs num único envio, ADR-006 RF-03) sai de escopo nesta reformulação — params agora são
+estruturados (repositório + prompt + specs), não uma lista plana; repetir o envio do
+formulário cobre o caso de uso. Ver `docs/specs/007-selecao-template-execucao/spec.md`,
+Non-Goals.
+
+`61/61 testes passando` (21 novos: `config.test.js`/`apiClient.test.js` atualizados,
+`specsClient.test.js`, `TemplateSelector.test.jsx`, `RepoPicker.test.jsx`,
+`SpecPicker.test.jsx`, `DynamicParamsForm.test.jsx`, `TriggerForm.test.jsx`
+reescrito — era 40 antes desta feature). `npm run build`/`npm run lint` limpos.
+**Não verificado ainda nesta sessão**: fluxo real num navegador (mesma limitação já
+registrada na feature `006` — sem Playwright neste ambiente).
 
 ## Status
 

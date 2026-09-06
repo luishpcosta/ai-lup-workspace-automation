@@ -137,6 +137,44 @@ def test_config_without_vars_block_behaves_like_before_ac19(tmp_path):
     assert chain.steps[0].params["body"] == "Docs: {{ docs_referenced }}"
 
 
+def test_whole_value_vars_ref_preserves_list_type_ac07(tmp_path):
+    config = tmp_path / "chain.yaml"
+    config.write_text(
+        "name: wf\n"
+        "vars:\n  docs_referenced: ['005-a', '004-b']\n  flag: true\n"
+        "steps:\n"
+        "  - name: s1\n    plugin: echo\n    params:\n"
+        "      docs_referenced: '{{ vars.docs_referenced }}'\n"
+        "      flag: '{{ vars.flag }}'\n",
+        encoding="utf-8",
+    )
+
+    chain = load_chain(config, known_plugins={"echo"})
+
+    # a param value that is *exactly* one {{ vars.x }} reference preserves the
+    # referenced value's own type (list/bool/etc.), instead of being stringified
+    # like a partial/embedded reference is (ADR-007: docs_referenced comes from
+    # the frontend's spec multiselect as a real JSON array, not a string).
+    assert chain.steps[0].params["docs_referenced"] == ["005-a", "004-b"]
+    assert chain.steps[0].params["flag"] is True
+
+
+def test_partial_vars_ref_is_still_stringified_ac08(tmp_path):
+    config = tmp_path / "chain.yaml"
+    config.write_text(
+        "name: wf\nvars:\n  docs_referenced: ['005-a', '004-b']\n"
+        "steps:\n  - name: s1\n    plugin: echo\n    params:\n"
+        "      body: 'Docs: {{ vars.docs_referenced }} (fim)'\n",
+        encoding="utf-8",
+    )
+
+    chain = load_chain(config, known_plugins={"echo"})
+
+    # not a whole-value reference (surrounded by other text) — falls back to
+    # the pre-existing str() substitution behavior, unchanged.
+    assert chain.steps[0].params["body"] == "Docs: ['005-a', '004-b'] (fim)"
+
+
 def test_unknown_vars_key_fails_validation_ac20(tmp_path):
     config = tmp_path / "chain.yaml"
     config.write_text(

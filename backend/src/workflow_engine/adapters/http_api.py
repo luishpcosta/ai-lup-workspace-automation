@@ -32,6 +32,15 @@ process, by `run`, or by `run-many` in a terminal (ADR-005, RNF-01).
 module's behalf of the new frontend: permissive by decision (`allow_origins=["*"]`,
 no credentials), consistent with "no authentication in this version" — not an
 oversight. No route, payload, or error contract changes.
+
+`GET /workflows`, `GET /workspace/repos` and `POST /runs/from-template` (ADR-007)
+add a template-driven trigger path alongside the existing `POST /runs`, which is
+unchanged: a template is a chain config file that also declares
+`id`/`label`/`description`/`params_schema` (`FileSystemWorkflowTemplateRegistry`).
+`POST /runs/from-template` validates the submitted params, materializes a real
+chain YAML under `<watch_dir>/_generated-configs/`, and calls `ServerState.trigger`
+— the exact same path `POST /runs` uses — so nothing about how a run is monitored,
+streamed, or resumed needs to know it came from a template.
 """
 
 from __future__ import annotations
@@ -40,12 +49,14 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from collections.abc import Generator, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
@@ -53,15 +64,31 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from workflow_engine.adapters.filesystem_plugin_registry import FileSystemPluginRegistry
+from workflow_engine.adapters.filesystem_workflow_template_registry import (
+    FileSystemWorkflowTemplateRegistry,
+)
 from workflow_engine.adapters.json_event_logger import JsonEventLogger
 from workflow_engine.adapters.sqlite_state_store import SqliteStateStore
 from workflow_engine.adapters.yaml_json_chain_loader import YamlJsonChainLoader
 from workflow_engine.application.workflow_engine import WorkflowEngine
-from workflow_engine.domain.exceptions import ChainValidationError, WorkflowFailed
+from workflow_engine.application.workflow_templates import (
+    materialize_chain_raw,
+    validate_params,
+)
+from workflow_engine.domain.exceptions import (
+    ChainValidationError,
+    WorkflowFailed,
+    WorkflowTemplateNotFoundError,
+)
 
 
 class RunRequest(BaseModel):
     config_path: str
+
+
+class FromTemplateRequest(BaseModel):
+    template_id: str
+    params: dict = {}
 
 
 class InstructionRequest(BaseModel):
@@ -89,6 +116,8 @@ class ServerState:
         watch_dir: str,
         max_parallel: int,
         correlation_keys: frozenset[str],
+        templates_dir: str = "./config/workflow_templates",
+        local_repos_root: str | None = None,
     ):
         self.registry = FileSystemPluginRegistry(plugins_dir)
         self.registry.discover()
@@ -98,9 +127,42 @@ class ServerState:
         self.pool = ThreadPoolExecutor(max_workers=max_parallel)
         self._lock = threading.Lock()
         self.active: dict[str, TrackedRun] = {}
+        self.local_repos_root = local_repos_root
+        self.template_registry = FileSystemWorkflowTemplateRegistry(templates_dir)
+        self.template_registry.discover()
+        # ADR-007: materialized chain YAMLs live inside watch_dir, so a template
+        # run is indistinguishable from any other run once triggered — same
+        # `.db` file convention, same monitoring/stream/instructions endpoints.
+        self.generated_configs_dir = self.watch_dir / "_generated-configs"
+        self.generated_configs_dir.mkdir(parents=True, exist_ok=True)
 
     def db_path(self, chain_name: str) -> Path:
         return self.watch_dir / f"{chain_name}.db"
+
+    def trigger_from_template(
+        self, template_id: str, submitted: dict
+    ) -> tuple[str | None, str | None]:
+        """Returns (chain_name, error_code). error_code is None on success.
+
+        Materializes a real chain YAML from the template + submitted params and
+        delegates to `trigger()` — a template run goes through the exact same
+        start path as `POST /runs`, so nothing downstream (monitoring, SSE
+        stream, instructions) needs to distinguish how a run was started.
+        """
+        try:
+            template = self.template_registry.get(template_id)
+        except WorkflowTemplateNotFoundError:
+            return None, "template_not_found"
+
+        errors = validate_params(template, submitted)
+        if errors:
+            return None, "invalid_params"
+
+        chain_name = f"{template_id}--{uuid.uuid4().hex[:8]}"
+        raw = materialize_chain_raw(template, submitted, chain_name)
+        config_path = self.generated_configs_dir / f"{chain_name}.yaml"
+        config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        return self.trigger(str(config_path))
 
     def trigger(self, config_path: str) -> tuple[str | None, str | None]:
         """Returns (chain_name, error_code). error_code is None on success."""
@@ -315,8 +377,17 @@ def build_app(
     watch_dir: str = "./run-many-state",
     max_parallel: int = 3,
     correlation_keys: frozenset[str] = frozenset(),
+    templates_dir: str = "./config/workflow_templates",
+    local_repos_root: str | None = None,
 ) -> FastAPI:
-    state = ServerState(plugins_dir, watch_dir, max_parallel, correlation_keys)
+    state = ServerState(
+        plugins_dir,
+        watch_dir,
+        max_parallel,
+        correlation_keys,
+        templates_dir=templates_dir,
+        local_repos_root=local_repos_root,
+    )
     app = FastAPI(title="workflow_engine serve")
     app.state.server = state
 
@@ -343,6 +414,56 @@ def build_app(
         if error == "invalid_config":
             raise HTTPException(
                 400, detail=_error("invalid_config", f"invalid config: {body.config_path}")
+            )
+        if error == "already_running":
+            raise HTTPException(
+                409, detail=_error("already_running", f"'{chain_name}' is already running")
+            )
+        return {"chain_name": chain_name, "status": "started"}
+
+    @app.get("/workflows")
+    def get_workflows() -> list[dict]:
+        return [
+            {
+                "id": t.id,
+                "label": t.label,
+                "description": t.description,
+                "params_schema": [
+                    {
+                        "name": p.name,
+                        "label": p.label,
+                        "type": p.type,
+                        "required": p.required,
+                        "source": p.source,
+                    }
+                    for p in t.params
+                ],
+            }
+            for t in state.template_registry.list()
+        ]
+
+    @app.get("/workspace/repos")
+    def get_local_repos() -> list[dict]:
+        if not state.local_repos_root:
+            return []
+        root = Path(state.local_repos_root)
+        if not root.is_dir():
+            return []
+        return [{"name": p.name, "path": str(p)} for p in sorted(root.iterdir()) if p.is_dir()]
+
+    @app.post("/runs/from-template", status_code=202)
+    def create_run_from_template(body: FromTemplateRequest) -> dict:
+        chain_name, error = state.trigger_from_template(body.template_id, body.params)
+        if error == "template_not_found":
+            raise HTTPException(
+                404, detail=_error("template_not_found", f"unknown template_id: {body.template_id}")
+            )
+        if error == "invalid_params":
+            raise HTTPException(
+                400,
+                detail=_error(
+                    "invalid_params", f"missing required params for '{body.template_id}'"
+                ),
             )
         if error == "already_running":
             raise HTTPException(
@@ -443,6 +564,8 @@ def cmd_serve(args) -> int:
         watch_dir=args.watch_dir,
         max_parallel=args.max_parallel,
         correlation_keys=correlation_keys,
+        templates_dir=args.workflow_templates_dir,
+        local_repos_root=args.local_repos_root,
     )
     uvicorn.run(app, host="127.0.0.1", port=args.port)
     return 0

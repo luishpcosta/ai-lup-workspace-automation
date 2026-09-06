@@ -2,9 +2,59 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-04
-**Active Feature:** 005-stream-interacao-agente - Streaming ao vivo + interação com o agente — Verify, `done`
-**Pending Gate:** Nenhum. Todas as 5 ADRs (001-005) deste contexto implementadas, testadas e verificadas.
+**Last Updated:** 2026-09-06
+**Active Feature:** 006-workflow-templates-execucao-adhoc — Templates de workflow, execução ad-hoc em repo local, modo `investigar` — Verify, `done`
+**Pending Gate:** Nenhum. Todas as 6 ADRs (001-005, 007) deste contexto implementadas, testadas e verificadas.
+
+## Sessão 2026-09-06 — ADR-007: templates de workflow, execução ad-hoc, modo `investigar`
+
+Redesenho do disparo de execuções, pedido pelo usuário: o painel (frontend) deixa de
+resolver texto livre por convenção de nome de arquivo e passa a expor **templates de
+workflow** (o motor decide quais plugins compõem cada um), rodar direto num
+**repositório local já existente** (sem clonar), e permitir um **modo de investigação**
+(prompt livre + specs a consultar, sem PR). `ai-lup-poc-target-cli` (já usado como alvo
+real da feature `002`) passa a ser o alvo de referência do novo template.
+
+**Decisões fechadas com o usuário antes de codificar** (via `AskUserQuestion`, não
+suposição): specs remotas consultadas direto do browser (sem proxy no backend);
+execução roda direto no repo local (sem `workspace_setup`); seleção de plugins via
+templates pré-definidos (não composição livre na UI); modo novo no
+`claude_code_runner.py` existente (não plugin separado); `configDir`/
+`resolveConfigPath.js` do frontend removidos (órfãos).
+
+**Implementação** (`adr/ADR-007-templates-workflow-execucao-adhoc.md` +
+`specs/006-workflow-templates-execucao-adhoc/`): novo `WorkflowTemplateRegistryPort` +
+`FileSystemWorkflowTemplateRegistry` (um YAML é, ao mesmo tempo, chain config válido e
+descritor de template — sem arquivo de metadata separado); `application/
+workflow_templates.py` (`validate_params`/`materialize_chain_raw`, puros); três rotas
+novas em `http_api.py` (`GET /workflows`, `GET /workspace/repos`,
+`POST /runs/from-template`) — a última materializa um YAML real em
+`<watch_dir>/_generated-configs/` e delega para o mesmo `ServerState.trigger()` que
+`POST /runs` já usa, sem tocar em `ChainLoaderPort`/ADR-005; modo `investigar` novo no
+Claude Code Runner (`workspace_path` agora também aceito via `context.params`, não só
+`context.input`); dois templates novos (`investigar-impacto`, `implementar-historia-sdd`
+— este último preserva 100% o pipeline existente, só como template a mais).
+
+**1 bug real corrigido durante a implementação** (achado ao desenhar o template
+`investigar-impacto`, cujo param `docs_referenced` é uma lista): `YamlJsonChainLoader.
+_resolve_vars` sempre fazia `str(raw_vars[key])`, mesmo quando o valor inteiro do param
+era exatamente uma referência `{{ vars.x }}` — uma lista viraria a *string*
+`"['005-a', '004-b']"`. Corrigido para preservar o tipo quando a referência é o valor
+inteiro do param (retrocompatível — referência parcial/embutida continua virando
+string); teste de regressão em `test_yaml_json_chain_loader.py`.
+
+**Entregável para `ai-lup-poc-target-cli`**: `backend/config/mcp-docs-proxy.json` (MCP
+`docs-mcp-proxy`, `BASE_URL=doc-repo-example` — diferente do `mcp-docusaurus.json`
+existente, que é HTTP e aponta pra outra fonte). O `.mcp.json` desse repo, hoje
+untracked, foi commitado lá (repo git separado) para viajar com um clone novo —
+`git -C ai-lup-poc-target-cli log -1` confirma o commit real.
+
+`109/109 testes passando` (22 novos: 5 no registry, 5 na aplicação, 7 na API HTTP, 3 no
+modo `investigar`, 2 no fix do Chain Loader). `ruff check`/`format` limpos,
+`compileall` ok. **Não verificado ainda nesta sessão**: execução real ponta a ponta do
+template `investigar-impacto` contra `ai-lup-poc-target-cli` de verdade (precisa de
+`docker build -t docs-mcp-proxy ./docs-mcp-proxy` local antes) — próximo passo sugerido,
+não bloqueante para o gate de Verify (toda AC já tem evidência automatizada).
 
 **Nota (mudança pequena, feita pela feature `006-frontend-painel-controle` do contexto
 `frontend`)**: `CORSMiddleware` adicionado a `build_app()` em `http_api.py` —

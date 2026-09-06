@@ -1,8 +1,8 @@
-"""Claude Code Runner plugin (ADR-002, AT-02/AT-03; ADR-005, AT-01..AT-03).
+"""Claude Code Runner plugin (ADR-002, AT-02/AT-03; ADR-005, AT-01..AT-03; ADR-007, AT-04).
 
 Invokes the `claude` CLI as a **long-lived process** (`Popen`, stdin/stdout kept
 open) using `--input-format stream-json --output-format stream-json --verbose`,
-parametrized by `params.modo` (`"coding"` or `"review"`). This replaced the
+parametrized by `params.modo` (`"coding"`, `"review"` or `"investigar"`). This replaced the
 ADR-002 one-shot `subprocess.run(capture_output=True)` invocation — the plugin's
 external contract (`params`/`output`, `TransientError` semantics) is unchanged.
 
@@ -72,6 +72,15 @@ _REVIEW_SCHEMA = {
     "required": ["summary"],
 }
 
+_INVESTIGAR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "relatorio": {"type": "string"},
+        "docs_consultados": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["relatorio", "docs_consultados"],
+}
+
 #: exit-code!=0 whose output matches one of these is treated as retriable;
 #: anything else is a permanent failure.
 _TRANSIENT_PATTERNS = ("rate_limit", "econnreset", "timeout", "network", "overloaded")
@@ -102,6 +111,8 @@ class ClaudeCodeRunnerPlugin(Plugin):
             return self._run_coding(context)
         if modo == "review":
             return self._run_review(context)
+        if modo == "investigar":
+            return self._run_investigar(context)
         raise ValueError(f"claude_code_runner: invalid modo {modo!r}")
 
     # -- modo coding (ADR-002-AT-02, AC-04/AC-05) ---------------------------
@@ -191,6 +202,61 @@ class ClaudeCodeRunnerPlugin(Plugin):
         return (
             f"Revise a mudança da PR {pr_ref} usando a skill {skill}. Ao final, "
             "retorne um JSON com 'summary' (resumo da revisão)."
+        )
+
+    # -- modo investigar (ADR-007, AT-04) ------------------------------------
+
+    def _run_investigar(self, context: PluginContext) -> dict:
+        """Read-only investigation: given a free-text prompt and (optionally)
+        which docs to consult, investigate impact in an existing local
+        checkout — no branch, no commit, no PR. Unlike `coding`/`review`, this
+        mode has no preceding `workspace_setup` step in its chain (ADR-007,
+        Decisão): `workspace_path` is expected in `params`, not carried forward
+        via `context.input` — though `context.input` still wins if present, for
+        consistency with the other modes.
+        """
+        params = context.params
+        input_data = context.input if isinstance(context.input, dict) else {}
+        workdir = input_data.get("workspace_path") or params.get("workspace_path")
+        if not workdir:
+            raise ValueError(
+                "claude_code_runner (investigar): no workspace_path in context.input "
+                "or context.params"
+            )
+        prompt_text = params["prompt"]
+        docs_referenced = params.get("docs_referenced") or []
+        mcp_config_path = params["mcp_config_path"]
+
+        log_path = self._session_log_path(workdir, context.run_id, context.step_name)
+        instructions_path = self._instructions_path(workdir, context.run_id, context.step_name)
+        cmd = self._build_cmd(mcp_config_path, _INVESTIGAR_SCHEMA)
+        prompt = self._investigar_prompt(prompt_text, docs_referenced)
+
+        returncode, lines = self._run_streaming_session(
+            cmd, workdir, log_path, instructions_path, prompt
+        )
+        self._raise_if_failed(returncode, lines, log_path)
+        result = self._extract_structured(self._find_result_event(lines), log_path)
+
+        return {
+            "status": "success",
+            "relatorio": result.get("relatorio", ""),
+            "docs_consultados": result.get("docs_consultados", []),
+            "session_log_path": str(log_path),
+        }
+
+    def _investigar_prompt(self, prompt_text: str, docs_referenced: list) -> str:
+        docs_hint = (
+            f" Consulte especificamente, via MCP, os documentos: {', '.join(docs_referenced)}."
+            if docs_referenced
+            else ""
+        )
+        return (
+            f"{prompt_text}{docs_hint} Esta é uma investigação somente-leitura: não "
+            "crie branch, não faça commit/push, não abra PR. Ao final, retorne um "
+            "JSON com 'relatorio' (texto da análise/impacto encontrado) e "
+            "'docs_consultados' (lista dos ids de documentos efetivamente consultados "
+            "via MCP)."
         )
 
     # -- shared plumbing -------------------------------------------------

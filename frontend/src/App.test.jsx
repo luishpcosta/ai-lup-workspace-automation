@@ -22,7 +22,7 @@ describe('App (ADR-006-AC-01, AC-02)', () => {
   it('goes straight to the dashboard when a configuration already exists', async () => {
     window.localStorage.setItem(
       'painel-config',
-      JSON.stringify({ baseUrl: 'http://localhost:8000', configDir: '/chains' }),
+      JSON.stringify({ baseUrl: 'http://localhost:8000', specsBaseUrl: 'https://example.test' }),
     )
     vi.spyOn(apiClient, 'getRuns').mockResolvedValue([])
     render(<App />)
@@ -36,7 +36,7 @@ describe('App — navigation to detail and back', () => {
   it('opens a run detail on row click, and returns to the list on "Voltar"', async () => {
     window.localStorage.setItem(
       'painel-config',
-      JSON.stringify({ baseUrl: 'http://localhost:8000', configDir: '/chains' }),
+      JSON.stringify({ baseUrl: 'http://localhost:8000', specsBaseUrl: 'https://example.test' }),
     )
     vi.spyOn(apiClient, 'getRuns').mockResolvedValue([
       { chain_name: 'hist-005', workflow_name: 'w', status: 'completed', updated_at: 't1' },

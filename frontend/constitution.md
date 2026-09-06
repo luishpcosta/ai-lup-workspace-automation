@@ -19,9 +19,10 @@ humano, nunca contornados silenciosamente.
    rota ou contrato de erro das ADRs do `motor-workflow` (ADR-004/ADR-005) é
    assumida ou proposta a partir daqui; qualquer necessidade de rota nova exige
    uma ADR própria, revisitando `afeta: [motor-workflow]` (ver ADR-006).
-6. **Configuração é sempre em runtime, nunca no bundle** — URL base do backend e
-   diretório-base de configs (ADR-006, RF-01) são valores configurados pelo
-   usuário e persistidos em `localStorage`; nunca hardcoded no build.
+6. **Configuração é sempre em runtime, nunca no bundle** — URL base do backend e URL
+   base do repositório remoto de specs (`specsBaseUrl`, ADR-007 RF-01; substituiu o
+   `configDir` da ADR-006) são valores configurados pelo usuário e persistidos em
+   `localStorage`; nunca hardcoded no build.
 
 ## Technical Constraints
 
@@ -37,9 +38,8 @@ humano, nunca contornados silenciosamente.
 
 - Verification command(s) que devem passar: `./init.sh` (`npm install && npm test
   && npm run build && npm run lint`).
-- Coverage / review expectations: toda AC de
-  `docs/specs/006-frontend-painel-controle/spec.md` precisa de evidência antes
-  de a feature ser marcada `done` em `tasks.md`.
+- Coverage / review expectations: toda AC de cada `docs/specs/NNN-slug/spec.md`
+  precisa de evidência antes de a feature ser marcada `done` em `tasks.md`.
 
 ## Amendments
 

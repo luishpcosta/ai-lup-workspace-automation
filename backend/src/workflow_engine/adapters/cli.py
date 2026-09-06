@@ -108,6 +108,22 @@ def build_parser() -> argparse.ArgumentParser:
         default="historia_id,branch,pr_number,pr_url",
         help="Same as `run --correlation-keys` (ADR-002, RNF-1). Default: %(default)s",
     )
+    serve_parser.add_argument(
+        "--workflow-templates-dir",
+        default="./config/workflow_templates",
+        help=(
+            "Directory to scan for workflow templates (ADR-007, GET /workflows and "
+            "POST /runs/from-template). Default: %(default)s"
+        ),
+    )
+    serve_parser.add_argument(
+        "--local-repos-root",
+        default=None,
+        help=(
+            "Root directory whose immediate subfolders are exposed via "
+            "GET /workspace/repos (ADR-007). Unset: the endpoint returns an empty list."
+        ),
+    )
     return parser
 
 
