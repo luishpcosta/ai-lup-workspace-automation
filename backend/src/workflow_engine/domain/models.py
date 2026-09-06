@@ -79,3 +79,35 @@ class StepExecution:
     error_message: str | None
     started_at: str | None
     finished_at: str | None
+
+
+@dataclass(frozen=True)
+class WorkflowTemplateParam:
+    """One entry of a template's `params_schema` (ADR-007, AT-01).
+
+    `source` hints a driving adapter (the frontend) how to populate the field:
+    `"local_repos"` (from `GET /workspace/repos`), `"spec_multiselect"` (from a
+    remote docs index the frontend fetches directly), or `None` for a plain
+    text/textarea field with no external data source.
+    """
+
+    name: str
+    label: str
+    type: str  # "text" | "textarea" | "select" | "multiselect"
+    required: bool = False
+    source: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowTemplateDefinition:
+    """A discovered workflow template (ADR-007, AT-01): a chain config file that
+    also declares `id`/`label`/`description`/`params_schema`. `raw` is the full
+    parsed file (name/vars/steps + metadata), reused verbatim when materializing
+    a run (`application.workflow_templates.materialize_chain_raw`).
+    """
+
+    id: str
+    label: str
+    description: str
+    params: tuple[WorkflowTemplateParam, ...]
+    raw: dict

@@ -1,67 +1,59 @@
 import { useState } from 'react'
-import { createRun } from '../lib/apiClient'
-import { getConfig } from '../lib/config'
-import { resolveConfigPath } from '../lib/resolveConfigPath'
+import { createRunFromTemplate } from '../lib/apiClient'
+import DynamicParamsForm from './DynamicParamsForm'
+import TemplateSelector from './TemplateSelector'
 
-function parseIds(raw) {
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-}
-
-// ADR-006-AT-03 / AC-06 (disparo em lote), AC-13 (erro de um item não cancela os demais).
+// ADR-007: substitui o disparo por texto livre + convenção de nome de arquivo
+// (ADR-006-AT-03) por template + formulário dinâmico. `implementar-historia-sdd`
+// (pipeline completo existente) e `investigar-impacto` (novo) aparecem na mesma
+// lista, escolhidos via TemplateSelector — nenhuma tela/aba separada.
 export default function TriggerForm({ onDispatched }) {
-  const [raw, setRaw] = useState('')
-  const [results, setResults] = useState([])
+  const [template, setTemplate] = useState(null)
+  const [values, setValues] = useState({})
   const [submitting, setSubmitting] = useState(false)
+  const [results, setResults] = useState([])
+
+  function handleSelectTemplate(selected) {
+    setTemplate(selected)
+    setValues({})
+  }
+
+  function handleParamChange(name, value) {
+    setValues((prev) => ({ ...prev, [name]: value }))
+  }
 
   async function handleSubmit(event) {
     event.preventDefault()
-    const ids = parseIds(raw)
-    if (ids.length === 0) return
-
-    const { configDir } = getConfig()
+    if (!template || submitting) return
     setSubmitting(true)
-    setResults(ids.map((id) => ({ id, status: 'pending' })))
-
-    const outcomes = await Promise.all(
-      ids.map(async (id) => {
-        const configPath = resolveConfigPath(configDir, id)
-        try {
-          const { chain_name } = await createRun(configPath)
-          return { id, status: 'success', chainName: chain_name }
-        } catch (err) {
-          return { id, status: 'error', message: err.message }
-        }
-      }),
-    )
-
-    setResults(outcomes)
-    setSubmitting(false)
-    onDispatched?.()
+    try {
+      const { chain_name: chainName } = await createRunFromTemplate(template.id, values)
+      setResults((prev) => [
+        { id: `${Date.now()}`, status: 'success', chainName },
+        ...prev,
+      ])
+      setValues({})
+      onDispatched?.()
+    } catch (err) {
+      setResults((prev) => [{ id: `${Date.now()}`, status: 'error', message: err.message }, ...prev])
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
     <section>
-      <h2>Disparar execuções</h2>
-      <form onSubmit={handleSubmit} aria-label="Disparar execuções" className="panel">
-        <label htmlFor="ids">IDs de documento de referência (um por linha)</label>
-        <textarea
-          id="ids"
-          value={raw}
-          onChange={(event) => setRaw(event.target.value)}
-          rows={4}
-        />
-        <button type="submit" className="btn-primary" disabled={submitting}>
+      <h2>Disparar execução</h2>
+      <form onSubmit={handleSubmit} aria-label="Disparar execução" className="panel">
+        <TemplateSelector value={template?.id} onSelect={handleSelectTemplate} />
+        <DynamicParamsForm template={template} values={values} onChange={handleParamChange} />
+        <button type="submit" className="btn-primary" disabled={submitting || !template}>
           Disparar
         </button>
         {results.length > 0 && (
           <ul aria-label="Resultado do disparo">
             {results.map((result) => (
               <li key={result.id}>
-                {result.id}:{' '}
-                {result.status === 'pending' && 'disparando…'}
                 {result.status === 'success' && `iniciado (${result.chainName})`}
                 {result.status === 'error' && <span role="alert">{result.message}</span>}
               </li>

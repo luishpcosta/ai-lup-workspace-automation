@@ -22,6 +22,7 @@ from workflow_engine.domain.models import (
     PluginContext,
     RetryPolicy,
     WorkflowRun,
+    WorkflowTemplateDefinition,
 )
 
 
@@ -115,4 +116,22 @@ class ChainLoaderPort(ABC):
 
     @abstractmethod
     def load(self, source: str, known_plugins: set[str] | None = None) -> ChainDefinition:
+        raise NotImplementedError
+
+
+class WorkflowTemplateRegistryPort(ABC):
+    """Resolves workflow templates by id (ADR-007, RF-1/RF-2). Mirrors
+    PluginRegistryPort's discover/get/list shape.
+    """
+
+    @abstractmethod
+    def discover(self) -> dict[str, WorkflowTemplateDefinition]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get(self, template_id: str) -> WorkflowTemplateDefinition:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list(self) -> list[WorkflowTemplateDefinition]:
         raise NotImplementedError

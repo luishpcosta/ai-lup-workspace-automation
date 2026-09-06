@@ -24,8 +24,10 @@ harness de desenvolvimento (SDD — spec-driven development).
 │
 ├── frontend/                  # painel de controle web (React + Vite) — o "client"
 │   ├── src/
-│   │   ├── lib/                # config.js, apiClient.js, resolveConfigPath.js
-│   │   └── components/         # SettingsScreen, RunsList, RunDetail, TriggerForm, StreamPanel, InstructionBox
+│   │   ├── lib/                # config.js, apiClient.js, specsClient.js
+│   │   └── components/         # SettingsScreen, RunsList, RunDetail, TriggerForm,
+│   │                           #   TemplateSelector, DynamicParamsForm, RepoPicker,
+│   │                           #   SpecPicker, StreamPanel, InstructionBox
 │   ├── adr/                    # decisões de arquitetura deste contexto (ADR-006)
 │   ├── docs/
 │   │   ├── CONTEXT.md
@@ -101,15 +103,20 @@ npm run dev       # http://localhost:5173
 
 ### Disparando uma execução pelo painel
 
-O formulário de disparo pede o **ID de um documento de referência**, não um
-caminho de arquivo. A SPA resolve isso sozinha por convenção exata de nome:
-`<diretório-base configurado>/<id>.yaml` — o arquivo precisa já existir nesse
-caminho (ver `backend/samples/*.yaml` para exemplos reais de chain config).
+O formulário de disparo pede para escolher um **workflow** (`GET /workflows`, ver
+`backend/config/workflow_templates/*.yaml`) e preencher os parâmetros que esse
+workflow declara — um campo por entrada de `params_schema`, incluindo, quando
+aplicável, um repositório local (`GET /workspace/repos`, configurado no backend via
+`--local-repos-root`) e specs de um repositório remoto de documentação (consultado
+direto pelo navegador, configurado na tela de Configuração como
+"URL base do repositório remoto de specs"). Ver
+`frontend/docs/specs/007-selecao-template-execucao/spec.md` e
+`backend/adr/ADR-007-templates-workflow-execucao-adhoc.md` para o desenho completo.
 
 ## Onde encontrar mais
 
-- **Decisões de arquitetura**: `backend/adr/` (motor-workflow, ADR-001 a
-  ADR-005) e `frontend/adr/` (frontend, ADR-006) — ver `CONTEXT-MAP.md` para o
+- **Decisões de arquitetura**: `backend/adr/` (motor-workflow, ADR-001 a ADR-005
+  e ADR-007) e `frontend/adr/` (frontend, ADR-006) — ver `CONTEXT-MAP.md` para o
   mapa completo e as relações entre os dois contextos.
 - **Specs por feature** (o que foi implementado e como foi verificado):
   `backend/docs/specs/` e `frontend/docs/specs/`.

@@ -2,9 +2,106 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-04
-**Active Feature:** 005-stream-interacao-agente - Streaming ao vivo + interação com o agente — Verify, `done`
-**Pending Gate:** Nenhum. Todas as 5 ADRs (001-005) deste contexto implementadas, testadas e verificadas.
+**Last Updated:** 2026-09-06
+**Active Feature:** 006-workflow-templates-execucao-adhoc — Templates de workflow, execução ad-hoc em repo local, modo `investigar` — Verify, `done`
+**Pending Gate:** Nenhum. Todas as 6 ADRs (001-005, 007) deste contexto implementadas, testadas e verificadas.
+
+## Sessão 2026-09-06 — ADR-007: templates de workflow, execução ad-hoc, modo `investigar`
+
+Redesenho do disparo de execuções, pedido pelo usuário: o painel (frontend) deixa de
+resolver texto livre por convenção de nome de arquivo e passa a expor **templates de
+workflow** (o motor decide quais plugins compõem cada um), rodar direto num
+**repositório local já existente** (sem clonar), e permitir um **modo de investigação**
+(prompt livre + specs a consultar, sem PR). `ai-lup-poc-target-cli` (já usado como alvo
+real da feature `002`) passa a ser o alvo de referência do novo template.
+
+**Decisões fechadas com o usuário antes de codificar** (via `AskUserQuestion`, não
+suposição): specs remotas consultadas direto do browser (sem proxy no backend);
+execução roda direto no repo local (sem `workspace_setup`); seleção de plugins via
+templates pré-definidos (não composição livre na UI); modo novo no
+`claude_code_runner.py` existente (não plugin separado); `configDir`/
+`resolveConfigPath.js` do frontend removidos (órfãos).
+
+**Implementação** (`adr/ADR-007-templates-workflow-execucao-adhoc.md` +
+`specs/006-workflow-templates-execucao-adhoc/`): novo `WorkflowTemplateRegistryPort` +
+`FileSystemWorkflowTemplateRegistry` (um YAML é, ao mesmo tempo, chain config válido e
+descritor de template — sem arquivo de metadata separado); `application/
+workflow_templates.py` (`validate_params`/`materialize_chain_raw`, puros); três rotas
+novas em `http_api.py` (`GET /workflows`, `GET /workspace/repos`,
+`POST /runs/from-template`) — a última materializa um YAML real em
+`<watch_dir>/_generated-configs/` e delega para o mesmo `ServerState.trigger()` que
+`POST /runs` já usa, sem tocar em `ChainLoaderPort`/ADR-005; modo `investigar` novo no
+Claude Code Runner (`workspace_path` agora também aceito via `context.params`, não só
+`context.input`); dois templates novos (`investigar-impacto`, `implementar-historia-sdd`
+— este último preserva 100% o pipeline existente, só como template a mais).
+
+**1 bug real corrigido durante a implementação** (achado ao desenhar o template
+`investigar-impacto`, cujo param `docs_referenced` é uma lista): `YamlJsonChainLoader.
+_resolve_vars` sempre fazia `str(raw_vars[key])`, mesmo quando o valor inteiro do param
+era exatamente uma referência `{{ vars.x }}` — uma lista viraria a *string*
+`"['005-a', '004-b']"`. Corrigido para preservar o tipo quando a referência é o valor
+inteiro do param (retrocompatível — referência parcial/embutida continua virando
+string); teste de regressão em `test_yaml_json_chain_loader.py`.
+
+**Entregável para `ai-lup-poc-target-cli`**: `backend/config/mcp-docs-proxy.json` (MCP
+`docs-mcp-proxy`, `BASE_URL=doc-repo-example` — diferente do `mcp-docusaurus.json`
+existente, que é HTTP e aponta pra outra fonte). O `.mcp.json` desse repo, hoje
+untracked, foi commitado lá (repo git separado) para viajar com um clone novo —
+`git -C ai-lup-poc-target-cli log -1` confirma o commit real.
+
+`109/109 testes passando` (22 novos: 5 no registry, 5 na aplicação, 7 na API HTTP, 3 no
+modo `investigar`, 2 no fix do Chain Loader). `ruff check`/`format` limpos,
+`compileall` ok.
+
+### Verificação real ponta a ponta (mesma sessão, a pedido do usuário) — 3 bugs reais achados e corrigidos
+
+`docker build -t docs-mcp-proxy ./docs-mcp-proxy` real; smoke-test direto do `claude`
+CLI com `--mcp-config config/mcp-docs-proxy.json` confirmou o MCP funcionando contra
+`doc-repo-example` de verdade (12 docs reais listados via `list_all`). Depois, `workflow
+serve` real (porta 8010, `--local-repos-root` apontando pro diretório-pai) disparando
+`POST /runs/from-template` de verdade contra o `ai-lup-poc-target-cli` real:
+
+1. **`mcp_config_path` relativo resolvido no diretório errado**: `./config/
+   mcp-docs-proxy.json` é resolvido pelo SO relativo ao `cwd` do processo `claude`
+   spawnado (que é `workspace_path`, o repo-alvo) — não ao `cwd` do motor. A primeira
+   tentativa falhou com "MCP config file not found" dentro do `ai-lup-poc-target-cli`.
+   Os exemplos antigos (`examples/implementar-historia-sdd.yaml`) sempre tiveram esse
+   mesmo problema latente; só nunca foi notado porque as execuções reais anteriores
+   (`samples/*.yaml`, feature `002`) usavam caminho absoluto, não o relativo do exemplo.
+   **Corrigido**: `_build_cmd` agora resolve `mcp_config_path` via `Path(...).resolve()`
+   (contra o cwd do motor) antes de montar o comando — beneficia `coding`/`review`
+   também, não só `investigar`. Teste de regressão novo.
+2. **`/stream`/`/instrucoes` nunca resolviam a etapa ativa no modo `investigar`**:
+   `_resolve_active_claude_step` só olhava `workspace_path` no `input` (carry-forward)
+   — o modo `investigar` não tem etapa anterior, então nunca tinha `input`. Achado
+   batendo o SSE stream de verdade contra uma execução `investigar` real rodando
+   (409 `not_streamable` com a etapa genuinamente `running`). **Corrigido**: fallback
+   para `step_def.params.get("workspace_path")`, mesma ordem que o próprio plugin já
+   usa. 2 testes de regressão novos.
+3. **`Popen(..., text=True)` sem `encoding="utf-8"`**: no Windows, isso cai no
+   codepage padrão do sistema (não UTF-8) tanto pra ler stdout quanto pra escrever
+   stdin — uma resposta real mais longa quebrou com `UnicodeDecodeError` no meio da
+   sessão. Mais grave: os prompts em português (`_coding_prompt`/`_review_prompt`/
+   `_investigar_prompt`, todos com acentos) também são escritos via esse mesmo stdin —
+   sem o fix, ficam sujeitos ao mesmo risco de corrupção silenciosa, não só de crash.
+   **Corrigido**: `encoding="utf-8"` explícito no `Popen`. Teste de regressão novo.
+
+**Verificado de verdade depois dos 3 fixes** (não só teste unitário): reiniciei o
+`workflow serve`, disparei `investigar-impacto` de novo contra o `ai-lup-poc-target-cli`
+real — completou com `relatorio`/`docs_consultados` corretos, cruzando de fato o
+conteúdo de `sdd/1-CLAUDE` buscado via MCP. Rodei uma segunda vez com um prompt mais
+longo ("conte de 1 a 20 devagar"), abri o SSE stream de verdade (200, dados reais
+chegando) e mandei uma instrução ao vivo via `POST /instrucoes` ("pare e responda
+PAROU") — o `relatorio` final foi literalmente "PAROU — execução interrompida a pedido
+do usuário", confirmando que ADR-005 (stream + steering ao vivo) funciona de ponta a
+ponta com o modo novo, não só por reuso de código não testado. Confirmado via `git
+status`/`git log` no `ai-lup-poc-target-cli` real, nas 3 rodadas: sempre `main`, sempre
+`nothing to commit` (além de `.workflow-logs/`, removido depois) — nenhuma branch,
+commit ou PR criada, garantia de somente-leitura do modo `investigar` validada de
+verdade, não só por design.
+
+`113/113 testes passando` (3 novos: fix do `mcp_config_path`, 2 do fallback de
+`workspace_path` em `/stream`/`/instrucoes`). `ruff`/`compileall` limpos.
 
 **Nota (mudança pequena, feita pela feature `006-frontend-painel-controle` do contexto
 `frontend`)**: `CORSMiddleware` adicionado a `build_app()` em `http_api.py` —

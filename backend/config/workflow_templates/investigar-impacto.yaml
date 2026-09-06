@@ -1,0 +1,51 @@
+# Template de workflow (ADR-007): "Investigar impacto" — roda o Claude Code em
+# modo `investigar` contra um repositório LOCAL já existente (sem clonar, sem
+# branch, sem PR), consultando as specs remotas selecionadas no painel.
+#
+# Este arquivo é, ao mesmo tempo, (a) um chain config válido — `name`/`steps`
+# são carregados sem modificação por YamlJsonChainLoader — e (b) um descritor
+# de template: `id`/`label`/`description`/`params_schema` são lidos só por
+# FileSystemWorkflowTemplateRegistry e ignorados pelo chain loader. `vars:` não
+# é declarado aqui — é preenchido em runtime a partir dos `params` submetidos
+# (ver application/workflow_templates.py::materialize_chain_raw).
+#
+# Referência de uso real: repositório `ai-lup-poc-target-cli` como
+# `repo_path`, MCP `docs-mcp-proxy` (config/mcp-docs-proxy.json) apontando
+# para `doc-repo-example` — mesma fonte que o SpecPicker do frontend lista
+# via `${specsBaseUrl}/docs-index.json`.
+
+id: investigar-impacto
+label: "Investigar impacto (leitura, sem PR)"
+description: >-
+  Roda o Claude Code em modo investigar contra um repositório local já
+  existente, consultando as specs remotas selecionadas — sem clonar, sem
+  branch, sem PR.
+params_schema:
+  - name: repo_path
+    label: "Repositório local"
+    type: select
+    required: true
+    source: local_repos
+  - name: prompt
+    label: "O que investigar"
+    type: textarea
+    required: true
+  - name: docs_referenced
+    label: "Specs de referência"
+    type: multiselect
+    required: false
+    source: spec_multiselect
+
+name: investigar-impacto
+steps:
+  - name: investigar
+    plugin: claude_code_runner
+    usa_output_anterior: false
+    params:
+      modo: "investigar"
+      mcp_config_path: "./config/mcp-docs-proxy.json"
+      workspace_path: "{{ vars.repo_path }}"
+      prompt: "{{ vars.prompt }}"
+      docs_referenced: "{{ vars.docs_referenced }}"
+    retry:
+      max_attempts: 1

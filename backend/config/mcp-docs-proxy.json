@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "docs-mcp-proxy": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "BASE_URL=https://luishpcosta.github.io/doc-repo-example",
+        "docs-mcp-proxy"
+      ]
+    }
+  }
+}

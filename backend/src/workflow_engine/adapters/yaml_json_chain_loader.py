@@ -23,6 +23,12 @@ from workflow_engine.domain.ports import ChainLoaderPort
 #: untouched, since that syntax is resolved later, by a plugin, from `context.input`.
 _VARS_REF = re.compile(r"\{\{\s*vars\.(\w+)\s*\}\}")
 
+#: Matches a param value that is *exactly* one `{{ vars.<key> }}` reference (allowing
+#: surrounding whitespace), nothing else — used to preserve the referenced value's own
+#: type (list/dict/bool/etc.) instead of stringifying it (ADR-007: a template param like
+#: `docs_referenced` is a list coming from the frontend's spec multiselect).
+_VARS_REF_WHOLE = re.compile(rf"^\s*{_VARS_REF.pattern}\s*$")
+
 
 class YamlJsonChainLoader(ChainLoaderPort):
     """Loads a chain definition from a `.yaml`/`.yml`/`.json` file."""
@@ -98,6 +104,14 @@ class YamlJsonChainLoader(ChainLoaderPort):
         `load()`, before any step executes.
         """
         if isinstance(value, str):
+            whole_match = _VARS_REF_WHOLE.match(value)
+            if whole_match:
+                key = whole_match.group(1)
+                if key not in raw_vars:
+                    raise ChainValidationError(
+                        f"{path}: step '{step_name}' references unknown vars key '{key}'"
+                    )
+                return raw_vars[key]  # preserves type: list/dict/bool/etc., not just str
 
             def _sub(match: re.Match[str]) -> str:
                 key = match.group(1)

@@ -101,6 +101,90 @@ def test_post_instruction_appends_to_deterministic_file_ac08(tmp_path):
     assert "pare agora" in instructions_path.read_text(encoding="utf-8")
 
 
+def test_stream_resolves_workspace_path_from_step_params_for_investigar_modo(tmp_path):
+    """Regression (ADR-007): found running the `investigar` modo for real against
+    a live SSE stream. `investigar` has no preceding workspace_setup step, so
+    there is no carry-forward `input` — workspace_path only exists in the step's
+    own `params`. Before this fix, `_resolve_active_claude_step` only ever
+    looked at `input`, so /stream and /instrucoes always answered 409 for this
+    modo, even with a genuinely running claude_code_runner step.
+    """
+    watch_dir = tmp_path / "watch"
+    watch_dir.mkdir()
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    config = write_chain(
+        tmp_path,
+        "wf-investigar.yaml",
+        "wf-investigar",
+        "claude_code_runner",
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "x",
+            "prompt": "y",
+            "workspace_path": str(workdir),
+        },
+    )
+    db_file = watch_dir / "wf-investigar.db"
+    with SqliteStateStore(db_file) as store:
+        store.create_run("run-1", "wf-investigar", str(config))
+        store.start_step("run-1", "s1", None)  # no carry-forward input at all
+
+    log_path = workdir / ".workflow-logs" / "run-1" / "s1.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text('{"type": "system", "subtype": "init"}\n', encoding="utf-8")
+
+    def complete_shortly():
+        time.sleep(0.15)
+        with SqliteStateStore(db_file) as store:
+            store.complete_step("run-1", "s1", {"status": "success"})
+
+    thread = threading.Thread(target=complete_shortly)
+    thread.start()
+
+    app = build_app(plugins_dir=str(tmp_path / "plugins"), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    with client.stream("GET", "/runs/wf-investigar/stream") as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+    thread.join(timeout=5)
+
+    assert '"type": "system"' in body
+
+
+def test_post_instruction_resolves_workspace_path_from_step_params_for_investigar_modo(tmp_path):
+    watch_dir = tmp_path / "watch"
+    watch_dir.mkdir()
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    config = write_chain(
+        tmp_path,
+        "wf-investigar.yaml",
+        "wf-investigar",
+        "claude_code_runner",
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "x",
+            "prompt": "y",
+            "workspace_path": str(workdir),
+        },
+    )
+    with SqliteStateStore(watch_dir / "wf-investigar.db") as store:
+        store.create_run("run-1", "wf-investigar", str(config))
+        store.start_step("run-1", "s1", None)
+
+    app = build_app(plugins_dir=str(tmp_path / "plugins"), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    response = client.post("/runs/wf-investigar/instrucoes", json={"mensagem": "pare agora"})
+
+    assert response.status_code == 202
+    instructions_path = workdir / ".workflow-logs" / "run-1" / "s1.instrucoes.jsonl"
+    assert instructions_path.exists()
+    assert "pare agora" in instructions_path.read_text(encoding="utf-8")
+
+
 def test_post_instruction_refuses_when_no_active_claude_step_ac09(tmp_path):
     app = build_app(plugins_dir=str(tmp_path / "plugins"), watch_dir=str(tmp_path / "watch"))
     client = TestClient(app)

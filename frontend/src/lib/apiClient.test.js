@@ -1,6 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setConfig } from './config'
-import { ApiError, cancelRun, createRun, getRunDetail, getRuns, openStream, postInstruction } from './apiClient'
+import {
+  ApiError,
+  cancelRun,
+  createRunFromTemplate,
+  getLocalRepos,
+  getRunDetail,
+  getRuns,
+  getWorkflows,
+  openStream,
+  postInstruction,
+} from './apiClient'
 
 function jsonResponse(status, body) {
   return {
@@ -12,14 +22,14 @@ function jsonResponse(status, body) {
 
 beforeEach(() => {
   window.localStorage.clear()
-  setConfig({ baseUrl: 'http://localhost:8000', configDir: '/chains' })
+  setConfig({ baseUrl: 'http://localhost:8000', specsBaseUrl: 'https://example.test/docs' })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('apiClient — connection errors (ADR-006-AC-03)', () => {
+describe('apiClient — connection errors', () => {
   it('surfaces a connection ApiError when fetch itself rejects', async () => {
     vi.stubGlobal(
       'fetch',
@@ -29,7 +39,7 @@ describe('apiClient — connection errors (ADR-006-AC-03)', () => {
   })
 })
 
-describe('apiClient — GET /runs and detail (ADR-006-AC-04, AC-05)', () => {
+describe('apiClient — GET /runs and detail', () => {
   it('returns the parsed list from GET /runs', async () => {
     const runs = [{ chain_name: 'hist-005', status: 'completed' }]
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, runs)))
@@ -40,7 +50,7 @@ describe('apiClient — GET /runs and detail (ADR-006-AC-04, AC-05)', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        jsonResponse(404, { error: { code: 'not_found', message: "unknown chain_name: x" } }),
+        jsonResponse(404, { error: { code: 'not_found', message: 'unknown chain_name: x' } }),
       ),
     )
     await expect(getRunDetail('x')).rejects.toMatchObject({
@@ -51,36 +61,71 @@ describe('apiClient — GET /runs and detail (ADR-006-AC-04, AC-05)', () => {
   })
 })
 
-describe('apiClient — POST /runs (ADR-006-AC-06, AC-13)', () => {
-  it('posts config_path and returns the started chain_name', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(202, { chain_name: 'hist-005', status: 'started' }),
-    )
+describe('apiClient — GET /workflows, GET /workspace/repos (ADR-007)', () => {
+  it('returns the parsed list from GET /workflows', async () => {
+    const workflows = [{ id: 'investigar-impacto', label: 'Investigar impacto', params_schema: [] }]
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, workflows))
     vi.stubGlobal('fetch', fetchMock)
-    await expect(createRun('/chains/HIST-005.yaml')).resolves.toEqual({
-      chain_name: 'hist-005',
-      status: 'started',
-    })
-    const [, options] = fetchMock.mock.calls[0]
-    expect(JSON.parse(options.body)).toEqual({ config_path: '/chains/HIST-005.yaml' })
+    await expect(getWorkflows()).resolves.toEqual(workflows)
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/workflows')
   })
 
-  it('maps 400 invalid_config to a typed error (one bad id in a batch)', async () => {
+  it('returns the parsed list from GET /workspace/repos', async () => {
+    const repos = [{ name: 'ai-lup-poc-target-cli', path: '/repos/ai-lup-poc-target-cli' }]
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, repos))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(getLocalRepos()).resolves.toEqual(repos)
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/workspace/repos')
+  })
+})
+
+describe('apiClient — POST /runs/from-template (ADR-007)', () => {
+  it('posts template_id and params, returns the started chain_name', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(202, { chain_name: 'investigar-impacto--abc123', status: 'started' }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      createRunFromTemplate('investigar-impacto', { repo_path: '/repos/x', prompt: 'oi' }),
+    ).resolves.toEqual({ chain_name: 'investigar-impacto--abc123', status: 'started' })
+
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8000/runs/from-template')
+    expect(JSON.parse(options.body)).toEqual({
+      template_id: 'investigar-impacto',
+      params: { repo_path: '/repos/x', prompt: 'oi' },
+    })
+  })
+
+  it('maps 400 invalid_params to a typed error', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        jsonResponse(400, { error: { code: 'invalid_config', message: 'invalid config' } }),
+        jsonResponse(400, { error: { code: 'invalid_params', message: 'missing required params' } }),
       ),
     )
-    await expect(createRun('/chains/DOES-NOT-EXIST.yaml')).rejects.toMatchObject({
+    await expect(createRunFromTemplate('investigar-impacto', {})).rejects.toMatchObject({
       kind: 'http',
       status: 400,
-      code: 'invalid_config',
+      code: 'invalid_params',
+    })
+  })
+
+  it('maps 404 template_not_found to a typed error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(404, { error: { code: 'template_not_found', message: 'unknown template' } }),
+      ),
+    )
+    await expect(createRunFromTemplate('does-not-exist', {})).rejects.toMatchObject({
+      code: 'template_not_found',
     })
   })
 })
 
-describe('apiClient — instrucoes/cancelar (ADR-006-AC-09, AC-10)', () => {
+describe('apiClient — instrucoes/cancelar', () => {
   it('posts a mensagem to /instrucoes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(202, { status: 'accepted' }))
     vi.stubGlobal('fetch', fetchMock)
@@ -108,7 +153,7 @@ describe('apiClient — instrucoes/cancelar (ADR-006-AC-09, AC-10)', () => {
   })
 })
 
-describe('apiClient — openStream (ADR-006-AC-07, AC-08)', () => {
+describe('apiClient — openStream', () => {
   function streamResponse(lines) {
     const encoder = new TextEncoder()
     let i = 0

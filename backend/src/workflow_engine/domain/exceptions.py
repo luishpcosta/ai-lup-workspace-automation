@@ -24,6 +24,10 @@ class PluginNotFoundError(Exception):
     """Raised when the engine looks up a plugin name the registry doesn't have."""
 
 
+class WorkflowTemplateNotFoundError(Exception):
+    """Raised when a template id has no matching file in the templates registry."""
+
+
 class ChainValidationError(Exception):
     """Raised when a chain config is malformed or references an unknown plugin."""
 

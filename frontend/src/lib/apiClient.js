@@ -64,8 +64,23 @@ export function getRunDetail(chainName) {
   return request(`/runs/${encodeURIComponent(chainName)}`)
 }
 
-export function createRun(configPath) {
-  return request('/runs', { method: 'POST', body: JSON.stringify({ config_path: configPath }) })
+// ADR-007 RF-01/RF-02/RF-03: disparo passa a ser por template (TriggerForm.jsx busca
+// os templates, monta o formulário a partir de params_schema, e dispara com os valores
+// preenchidos) — POST /runs {config_path} (disparo por arquivo direto) continua
+// existindo no backend, mas não tem mais chamador neste frontend.
+export function getWorkflows() {
+  return request('/workflows')
+}
+
+export function getLocalRepos() {
+  return request('/workspace/repos')
+}
+
+export function createRunFromTemplate(templateId, params) {
+  return request('/runs/from-template', {
+    method: 'POST',
+    body: JSON.stringify({ template_id: templateId, params }),
+  })
 }
 
 export function postInstruction(chainName, mensagem) {

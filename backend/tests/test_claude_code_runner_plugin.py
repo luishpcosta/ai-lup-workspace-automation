@@ -1,5 +1,6 @@
 import json
 import time
+from pathlib import Path
 
 import claude_code_runner
 import pytest
@@ -60,10 +61,12 @@ class FakePopenFactory:
         self.output_lines = output_lines
         self.returncode = returncode
         self.calls: list[list[str]] = []
+        self.kwargs: list[dict] = []
         self.procs: list[FakePopen] = []
 
     def __call__(self, cmd, **kwargs):
         self.calls.append(cmd)
+        self.kwargs.append(kwargs)
         proc = FakePopen(self.output_lines, self.returncode)
         self.procs.append(proc)
         return proc
@@ -289,6 +292,147 @@ def test_stdin_closed_after_result_event(tmp_path):
     # live) — the plugin must close it once the turn's result event arrives,
     # or the real CLI process would hang forever.
     assert factory.procs[0].stdin.closed
+
+
+def test_popen_is_pinned_to_utf8_not_the_platform_default_encoding(tmp_path):
+    """Regression: found running the investigar modo for real on Windows — the
+    real `claude` process emits/reads UTF-8, but `text=True` alone falls back to
+    locale.getpreferredencoding() (a single-byte Windows codepage in that
+    environment), which raised UnicodeDecodeError on real (non-ASCII, Portuguese
+    accented) output and would have silently mangled stdin prompts too.
+    """
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [result_line({"summary": "ok", "docs_referenced": []})]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding",
+            "mcp_config_path": "./config/mcp-docusaurus.json",
+            "historia_id": "HIST-1",
+        },
+        input_data={"workspace_path": str(workdir)},
+        step_name="s1",
+    )
+
+    plugin.run(context)
+
+    assert factory.kwargs[0]["encoding"] == "utf-8"
+    assert factory.kwargs[0]["text"] is True
+
+
+def test_relative_mcp_config_path_is_resolved_against_engine_cwd_not_workspace(tmp_path):
+    """Regression: found running the investigar mode for real (ADR-007) against
+    ai-lup-poc-target-cli — a relative mcp_config_path must resolve against this
+    process's own cwd (the motor's), never against workspace_path (the target
+    repo, passed as Popen's cwd=), or the CLI fails with "MCP config file not
+    found" because config/ only exists in the motor's checkout.
+    """
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [result_line({"relatorio": "ok", "docs_consultados": []})]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "investigue",
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="investigar",
+    )
+
+    plugin.run(context)
+
+    cmd = factory.calls[0]
+    resolved = cmd[cmd.index("--mcp-config") + 1]
+    assert Path(resolved).is_absolute()
+    assert Path(resolved) == (Path.cwd() / "config" / "mcp-docs-proxy.json").resolve()
+    assert not resolved.startswith(str(workdir))
+
+
+def test_investigar_mode_reads_workspace_path_from_params_ac_investigar_01(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [
+        system_line(),
+        result_line({"relatorio": "sem impacto relevante", "docs_consultados": ["005-x"]}),
+    ]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "investigue o impacto de X",
+            "docs_referenced": ["005-x"],
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="investigar",
+    )
+
+    output = plugin.run(context)
+
+    assert output["status"] == "success"
+    assert output["relatorio"] == "sem impacto relevante"
+    assert output["docs_consultados"] == ["005-x"]
+    first_message = json.loads(factory.procs[0].stdin.lines[0])
+    content = first_message["message"]["content"]
+    assert "investigue o impacto de X" in content
+    assert "005-x" in content
+    # read-only: prompt explicitly forbids branch/commit/PR, not just omits them
+    assert "não crie branch" in content.lower()
+    assert "não abra pr" in content.lower()
+
+
+def test_investigar_mode_prefers_workspace_path_from_input_when_present(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [result_line({"relatorio": "ok", "docs_consultados": []})]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "investigue",
+            "workspace_path": "/should/not/be/used",
+        },
+        input_data={"workspace_path": str(workdir)},
+        step_name="investigar",
+    )
+
+    plugin.run(context)
+
+    expected_log = workdir / ".workflow-logs" / "run-1" / "investigar.log"
+    assert expected_log.exists()
+
+
+def test_investigar_mode_without_workspace_path_raises(tmp_path):
+    factory = FakePopenFactory([result_line({"relatorio": "ok", "docs_consultados": []})])
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "investigar",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "investigue",
+        },
+        input_data=None,
+        step_name="investigar",
+    )
+
+    with pytest.raises(ValueError, match="workspace_path"):
+        plugin.run(context)
+    assert factory.calls == []
 
 
 def test_forwards_pending_instruction_to_stdin_ac04(tmp_path):
