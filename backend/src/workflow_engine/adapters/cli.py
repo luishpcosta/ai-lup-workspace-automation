@@ -8,6 +8,7 @@ and wires them into the application core.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -118,10 +119,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve_parser.add_argument(
         "--local-repos-root",
-        default=None,
+        default=os.environ.get("LOCAL_REPOS_ROOT"),
         help=(
             "Root directory whose immediate subfolders are exposed via "
-            "GET /workspace/repos (ADR-007). Unset: the endpoint returns an empty list."
+            "GET /workspace/repos (ADR-007). Falls back to the LOCAL_REPOS_ROOT "
+            "environment variable (ADR-009, AC-08); this flag wins over it. "
+            "Unset in both: the endpoint returns an empty list."
         ),
     )
     return parser

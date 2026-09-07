@@ -12,7 +12,7 @@ export default function DynamicParamsForm({ template, values, onChange }) {
       {template.params_schema.map((param) => {
         const fieldId = `param-${param.name}`
         return (
-          <div key={param.name} className="dynamic-param">
+          <div key={param.name} className="field dynamic-param">
             <label htmlFor={fieldId}>
               {param.label}
               {param.required ? ' *' : ''}

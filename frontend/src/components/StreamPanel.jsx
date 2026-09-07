@@ -36,14 +36,16 @@ export default function StreamPanel({ chainName, onRefresh }) {
   }, [chainName])
 
   return (
-    <section className="panel" aria-label="Stream ao vivo">
-      <h3>Stream ao vivo</h3>
-      <button type="button" className="btn-secondary" onClick={onRefresh}>
-        Atualizar
-      </button>
-      {status === 'inactive' && <p>Sem sessão ativa no momento.</p>}
+    <section className="panel stream" aria-label="Stream ao vivo">
+      <div className="section-head">
+        <h3>Stream ao vivo</h3>
+        <button type="button" className="btn-secondary" onClick={onRefresh}>
+          Atualizar
+        </button>
+      </div>
+      {status === 'inactive' && <p className="settings-hint">Sem sessão ativa no momento.</p>}
       {status === 'error' && <p role="alert">{errorMessage}</p>}
-      <pre>{lines.join('\n')}</pre>
+      {lines.length > 0 && <pre>{lines.join('\n')}</pre>}
     </section>
   )
 }

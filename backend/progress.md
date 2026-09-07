@@ -3,8 +3,77 @@
 ## Current State
 
 **Last Updated:** 2026-09-06
-**Active Feature:** 006-workflow-templates-execucao-adhoc — Templates de workflow, execução ad-hoc em repo local, modo `investigar` — Verify, `done`
-**Pending Gate:** Nenhum. Todas as 6 ADRs (001-005, 007) deste contexto implementadas, testadas e verificadas.
+**Active Feature:** 007-implementar-local-pr-via-ci — modo `coding_local` + ação `confirm_pr` — Verify, `done`
+**Pending Gate:** Nenhum. Todas as 7 ADRs (001-005, 007, 008) deste contexto implementadas, testadas e verificadas — 008 com verificação ponta a ponta real (PR #8 em `ai-lup-poc-target-cli`).
+
+## Sessão 2026-09-06 (2) — ADR-008: implementar em repositório local, PR via CI do repositório-alvo
+
+Usuário revisou a tela do painel e notou que o mecanismo genérico de disparo por
+template (ADR-007) só estava ligado a `investigar-impacto` (leitura) — o único
+template que de fato implementa código (`implementar-historia-sdd`) ainda exigia
+`repo_url` (clone do zero) em vez de repositório local, e abria a PR ele mesmo. Demanda
+elicitada via skill `issue-to-adr`: quer implementar contra um repositório local
+**já instrumentado com seu próprio fluxo de Git** (verificado ao vivo em
+`ai-lup-poc-target-cli`: `CLAUDE.md` "Git Workflow" + `.github/workflows/ci.yml`, job
+`open-pr` — nunca push direto em `main`, o próprio repo cria a PR via CI depois do
+push). Uma única opção pedida (sem variantes "sem PR"/"PR com checks completos"),
+confirmação da PR via **polling com timeout** (`AskUserQuestion`, não suposição).
+
+**Implementação** (`adr/ADR-008-implementar-local-pr-via-ci-repo-alvo.md` +
+`specs/007-implementar-local-pr-via-ci/`): modo `coding_local` novo no Claude Code
+Runner (mesma convenção de `investigar` — `workspace_path` de `context.params`, sem
+`workspace_setup` antes; diferente de `investigar`, escreve código e reporta `branch`
+no JSON estruturado, já que o motor não decide o nome da branch — quem decide é o
+próprio repositório-alvo); ação `confirm_pr` nova no plugin Git/PR (`gh pr list --head
+<branch>`, `TransientError` se ainda não achou — reusa a política `retry:` já existente
+no motor como mecanismo de polling, mesma usada por `aguardar_checks`); template novo
+`config/workflow_templates/implementar-local.yaml` (dois steps, `params_schema` igual
+ao de `investigar-impacto`). **Nenhuma mudança de plugin novo, script `.sh` novo, nem
+código em domínio/aplicação/HTTP API/frontend** — decisão deliberada (ver ADR-008,
+Alternativas: um script `.sh` do motor teria problema de resolução de caminho contra
+`shell_script_runner`, que resolve relativo ao `workspace_path`, não ao motor).
+
+`120/120 testes passando` (7 novos: 3 no modo `coding_local`, 4 na ação `confirm_pr`).
+`ruff check`/`format`/`compileall` limpos.
+
+**Pendente ao final da sessão anterior**: T-6 (verificação ponta a ponta contra o
+repositório real) não tinha sido rodada sem confirmação explícita do usuário. Usuário
+confirmou ("sim") logo em seguida — rodada nesta sessão, ver abaixo.
+
+### Verificação ponta a ponta real (mesma feature, a pedido do usuário) — T-6 concluída
+
+Pré-requisitos confirmados antes de disparar: `claude 2.1.263`, `gh` autenticado
+(`luishpcosta`), imagem `docs-mcp-proxy:latest` já buildada. `workflow serve` real
+(porta 8010, `--local-repos-root` apontando pro diretório-pai) — `GET /workflows`
+confirmou os 3 templates (`implementar-local` incluso, `params_schema` correto);
+`GET /workspace/repos` listou `ai-lup-poc-target-cli` com o path absoluto certo.
+
+`POST /runs/from-template` real (`{template_id: "implementar-local", params:
+{repo_path: <path do ai-lup-poc-target-cli>, prompt: "complete a feature 001-example
+end-to-end (script hello mínimo), seguindo o harness SDD e o Git Workflow deste
+repositório", docs_referenced: []}}`) — escolhido deliberadamente um escopo mínimo
+(script `hello.py` sem dependências) só para validar o mecanismo, não uma feature real.
+
+`chain_name: implementar-local--d4384c0a` completou em ~3min09s, as duas etapas na
+primeira tentativa: `implementar` (~2min37s, sem clone — direto no checkout local)
+reportou `branch: feature/001-example-hello`; `confirmar_pr` (~32s) reportou
+`status: confirmed, pr_number: 8` já na 1ª chamada de `gh pr list` (CI do repo-alvo foi
+rápida o bastante).
+
+**Confirmado de forma independente** (não só o relato do plugin): `git branch -a` +
+`git log origin/feature/001-example-hello` no repo real mostram o commit
+`7e4eada` ("Implement feature 001-example: hello world script + real init.sh check")
+na branch nova; `gh pr view 8` confirma `state: OPEN` e — o mais importante — `body`
+é literalmente o template hardcoded da CI do repositório-alvo ("PR aberto
+automaticamente pela CI após `init.sh` passar..."), prova de que o `git_pr` do motor
+nunca chamou `create_pr` neste fluxo; `gh pr checks 8` mostra os 2 jobs da CI do
+repo-alvo (`Valida harness SDD`, `Abre PR automaticamente`) `pass`. PR real:
+https://github.com/luishpcosta/ai-lup-poc-target-cli/pull/8.
+
+Nenhum bug novo encontrado nesta verificação — os 3 bugs de infraestrutura já tinham
+sido corrigidos na verificação ponta a ponta da feature `006` (mesmo `mcp_config_path`
+resolvido corretamente, mesmo `Popen` com `encoding=utf-8`). `tasks.md`/`ADR-008-acs.md`
+atualizados com a evidência; T-6 marcada `done`, feature `007` em Verify/`done`.
 
 ## Sessão 2026-09-06 — ADR-007: templates de workflow, execução ad-hoc, modo `investigar`
 

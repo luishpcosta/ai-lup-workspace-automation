@@ -29,7 +29,7 @@ export default function TemplateSelector({ value, onSelect }) {
   const selected = templates.find((template) => template.id === value)
 
   return (
-    <div>
+    <div className="field">
       <label htmlFor="template">Workflow</label>
       <select
         id="template"
