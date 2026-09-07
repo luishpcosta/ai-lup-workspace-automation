@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setConfig } from './config'
 import {
   ApiError,
+  archiveRun,
   cancelRun,
   createRunFromTemplate,
   getLocalRepos,
@@ -10,6 +11,7 @@ import {
   getWorkflows,
   openStream,
   postInstruction,
+  unarchiveRun,
 } from './apiClient'
 
 function jsonResponse(status, body) {
@@ -58,6 +60,50 @@ describe('apiClient — GET /runs and detail', () => {
       status: 404,
       code: 'not_found',
     })
+  })
+})
+
+describe('apiClient — arquivamento (ADR-011)', () => {
+  it('GET /runs sem archived não adiciona query string', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, []))
+    vi.stubGlobal('fetch', fetchMock)
+    await getRuns()
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/runs')
+  })
+
+  it('GET /runs?archived=true quando archived: true', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, []))
+    vi.stubGlobal('fetch', fetchMock)
+    await getRuns({ archived: true })
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/runs?archived=true')
+  })
+
+  it('archiveRun chama POST /runs/{chain_name}/arquivar', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { chain_name: 'hist-005', archived: true }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(archiveRun('hist-005')).resolves.toEqual({
+      chain_name: 'hist-005',
+      archived: true,
+    })
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8000/runs/hist-005/arquivar')
+    expect(options.method).toBe('POST')
+  })
+
+  it('unarchiveRun chama POST /runs/{chain_name}/desarquivar', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { chain_name: 'hist-005', archived: false }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(unarchiveRun('hist-005')).resolves.toEqual({
+      chain_name: 'hist-005',
+      archived: false,
+    })
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8000/runs/hist-005/desarquivar')
+    expect(options.method).toBe('POST')
   })
 })
 

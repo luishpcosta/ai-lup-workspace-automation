@@ -193,6 +193,61 @@ def test_get_run_detail_hides_io_by_default_ac06(tmp_path):
     assert isinstance(with_io["steps"][0]["output"], dict)  # parsed JSON, not a raw string
 
 
+def test_get_run_detail_includes_plugin_per_step_adr010_ac08(tmp_path):
+    """ADR-010-AC-08: cada item de `steps` ganha `plugin`, resolvido do YAML da
+    chain via `config_path` — aditivo, resto da resposta inalterado (AC-09)."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    config = write_chain(tmp_path, "c.yaml", "wf-plugin", "echo")
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(config)})
+    assert wait_for(lambda: client.get("/runs/wf-plugin").json().get("status") == "completed")
+
+    detail = client.get("/runs/wf-plugin").json()
+    assert detail["steps"][0]["plugin"] == "echo"
+    # campos existentes antes desta feature continuam presentes e no mesmo formato
+    # (`archived` é aditivo, ADR-011).
+    assert set(detail) == {
+        "chain_name",
+        "run_id",
+        "status",
+        "created_at",
+        "updated_at",
+        "steps",
+        "archived",
+    }
+    assert set(detail["steps"][0]) >= {
+        "step_name",
+        "status",
+        "attempt_count",
+        "started_at",
+        "finished_at",
+        "error_message",
+    }
+
+
+def test_get_run_detail_plugin_is_null_when_config_missing_adr010_ac08(tmp_path):
+    """Config apagado depois do run: `plugin` degrada para null, resposta não falha."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    config = write_chain(tmp_path, "c.yaml", "wf-noconfig", "echo")
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(config)})
+    assert wait_for(lambda: client.get("/runs/wf-noconfig").json().get("status") == "completed")
+
+    config.unlink()
+    detail = client.get("/runs/wf-noconfig").json()
+    assert detail["steps"][0]["plugin"] is None
+
+
 def test_get_run_detail_unknown_chain_ac07(tmp_path):
     app = build_app(plugins_dir=str(tmp_path / "plugins"), watch_dir=str(tmp_path / "watch"))
     client = TestClient(app)
@@ -316,6 +371,137 @@ def test_cors_allows_cross_origin_requests_from_the_frontend_ac11(tmp_path):
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_archive_run_on_preexisting_db_without_archived_column_adr011_ac01(tmp_path):
+    """ADR-011-AC-01: `.db` criado antes desta feature (sem `archived_at`) — a
+    migração aditiva roda sob demanda e a operação completa normalmente."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    watch_dir = tmp_path / "watch"
+    watch_dir.mkdir()
+
+    # Simula um `.db` de antes desta feature: schema sem `archived_at` (o próprio
+    # `SqliteStateStore` não conhece a coluna nova).
+    registry = FileSystemPluginRegistry(plugins_dir)
+    registry.discover()
+    chain = YamlJsonChainLoader().load(
+        str(write_chain(tmp_path, "old.yaml", "wf-old", "echo")),
+        known_plugins=registry.names(),
+    )
+    with SqliteStateStore(watch_dir / "wf-old.db") as store:
+        WorkflowEngine(registry, store).run(chain, "old.yaml")
+
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    response = client.post("/runs/wf-old/arquivar")
+
+    assert response.status_code == 200
+    assert response.json() == {"chain_name": "wf-old", "archived": True}
+    assert client.get("/runs/wf-old").json()["archived"] is True
+
+
+def test_archive_and_unarchive_run_are_idempotent_adr011_ac02_ac03(tmp_path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    config = write_chain(tmp_path, "c.yaml", "wf-archive", "echo")
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(config)})
+    assert wait_for(lambda: client.get("/runs/wf-archive").json().get("status") == "completed")
+
+    first = client.post("/runs/wf-archive/arquivar")
+    second = client.post("/runs/wf-archive/arquivar")
+    assert first.status_code == 200
+    assert first.json() == {"chain_name": "wf-archive", "archived": True}
+    assert second.json() == {"chain_name": "wf-archive", "archived": True}
+    assert client.get("/runs/wf-archive").json()["archived"] is True
+
+    first_un = client.post("/runs/wf-archive/desarquivar")
+    second_un = client.post("/runs/wf-archive/desarquivar")
+    assert first_un.status_code == 200
+    assert first_un.json() == {"chain_name": "wf-archive", "archived": False}
+    assert second_un.json() == {"chain_name": "wf-archive", "archived": False}
+    assert client.get("/runs/wf-archive").json()["archived"] is False
+
+
+def test_archive_and_unarchive_unknown_chain_ac04(tmp_path):
+    app = build_app(plugins_dir=str(tmp_path / "plugins"), watch_dir=str(tmp_path / "watch"))
+    client = TestClient(app)
+
+    archive_resp = client.post("/runs/does-not-exist/arquivar")
+    unarchive_resp = client.post("/runs/does-not-exist/desarquivar")
+
+    assert archive_resp.status_code == 404
+    assert archive_resp.json()["error"]["code"] == "not_found"
+    assert unarchive_resp.status_code == 404
+    assert unarchive_resp.json()["error"]["code"] == "not_found"
+
+
+def test_get_runs_default_excludes_archived_adr011_ac06(tmp_path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(write_chain(tmp_path, "a.yaml", "wf-a", "echo"))})
+    client.post("/runs", json={"config_path": str(write_chain(tmp_path, "b.yaml", "wf-b", "echo"))})
+    assert wait_for(lambda: client.get("/runs/wf-a").json().get("status") == "completed")
+    assert wait_for(lambda: client.get("/runs/wf-b").json().get("status") == "completed")
+
+    client.post("/runs/wf-b/arquivar")
+
+    default_names = {r["chain_name"] for r in client.get("/runs").json()}
+    assert default_names == {"wf-a"}
+    for r in client.get("/runs").json():
+        assert r["archived"] is False
+
+    archived_only = client.get("/runs", params={"archived": "true"}).json()
+    archived_names = {r["chain_name"] for r in archived_only}
+    assert archived_names == {"wf-b"}
+    for r in archived_only:
+        assert r["archived"] is True
+
+
+def test_get_run_detail_includes_archived_field_adr011_ac07(tmp_path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    config = write_chain(tmp_path, "c.yaml", "wf-detail-archived", "echo")
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(config)})
+    assert wait_for(
+        lambda: client.get("/runs/wf-detail-archived").json().get("status") == "completed"
+    )
+
+    before = client.get("/runs/wf-detail-archived").json()
+    assert before["archived"] is False
+    # campos existentes antes desta feature continuam presentes.
+    assert set(before) == {
+        "chain_name",
+        "run_id",
+        "status",
+        "created_at",
+        "updated_at",
+        "steps",
+        "archived",
+    }
+
+    client.post("/runs/wf-detail-archived/arquivar")
+    after = client.get("/runs/wf-detail-archived").json()
+    assert after["archived"] is True
+    # arquivar não bloqueia o acesso ao detalhe (ADR-011-AC-15).
+    assert after["status"] == "completed"
 
 
 def test_cors_preflight_allows_post_with_content_type_ac11(tmp_path):

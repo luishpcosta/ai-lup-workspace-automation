@@ -43,9 +43,6 @@ export default function TriggerForm({ onDispatched }) {
 
   return (
     <section className="trigger">
-      <div className="section-head">
-        <h2>Disparar execução</h2>
-      </div>
       <form onSubmit={handleSubmit} aria-label="Disparar execução" className="panel">
         <TemplateSelector value={template?.id} onSelect={handleSelectTemplate} />
         <DynamicParamsForm template={template} values={values} onChange={handleParamChange} />

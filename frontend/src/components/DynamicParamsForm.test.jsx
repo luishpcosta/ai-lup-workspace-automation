@@ -14,7 +14,7 @@ const TEMPLATE = {
     { name: 'repo_path', label: 'Repositório local', type: 'select', required: true, source: 'local_repos' },
     {
       name: 'docs_referenced',
-      label: 'Specs de referência',
+      label: 'Knowledge Bases',
       type: 'multiselect',
       required: false,
       source: 'spec_multiselect',
@@ -55,15 +55,15 @@ describe('DynamicParamsForm (ADR-007 RF-01)', () => {
 
     // RepoPicker/SpecPicker mounted for the sourced fields (own tests cover their behavior).
     expect(await screen.findByText(/Nenhum repositório local configurado/)).toBeInTheDocument()
-    expect(await screen.findByText(/Nenhuma spec encontrada/)).toBeInTheDocument()
+    expect(await screen.findByText(/Nenhuma Knowledge Base encontrada/)).toBeInTheDocument()
   })
 
   it('marks required params with an asterisk', async () => {
     render(<DynamicParamsForm template={TEMPLATE} values={{}} onChange={() => {}} />)
     expect(screen.getByText('O que investigar *')).toBeInTheDocument()
-    expect(screen.getByText('Specs de referência')).toBeInTheDocument()
+    expect(screen.getByText('Knowledge Bases')).toBeInTheDocument()
     // let RepoPicker/SpecPicker's pending fetches settle before the test ends
     await screen.findByText(/Nenhum repositório local configurado/)
-    await screen.findByText(/Nenhuma spec encontrada/)
+    await screen.findByText(/Nenhuma Knowledge Base encontrada/)
   })
 })

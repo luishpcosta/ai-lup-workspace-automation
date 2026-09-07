@@ -2,10 +2,118 @@
 
 ## Current State
 
-**Last Updated:** 2026-09-06
-**Active Feature:** 008-config-boot-runtime-pasta-trabalho — Configuração de boot em runtime e pasta de trabalho — Verify, `done`
+**Last Updated:** 2026-09-07
+**Active Feature:** 010-atualizacao-arquivamento-execucoes — Atualização automática do painel/detalhe + arquivamento de execuções — Verify, `done`
 **Active SDD Phase:** Verify
-**Pending Gate:** Nenhum. Todas as 8 ACs (AC-01 a AC-08) implementadas e verificadas — ver `docs/specs/008-config-boot-runtime-pasta-trabalho/tasks.md`.
+**Pending Gate:** Nenhum. Todas as 15 ACs (AC-01 a AC-15) implementadas e verificadas — ver `docs/specs/010-atualizacao-arquivamento-execucoes/tasks.md`.
+
+## Sessão 2026-09-07 — ADR-011 (contexto `frontend`, `afeta: [motor-workflow]`): atualização automática + arquivamento
+
+Três atritos relatados pelo usuário em conversa (elicitado via skill `issue-to-adr`,
+sem PRD — ver ADR-011, Contexto):
+
+1. Ao disparar uma execução, o painel de execuções só refletia o progresso real via
+   clique manual em "Atualizar".
+2. A tela de detalhe buscava as etapas uma única vez ao entrar — o botão "Atualizar"
+   ali só reconectava o stream ao vivo, nunca refazia a busca do detalhe, então a
+   tabela de etapas ficava parada mesmo com a execução avançando de verdade.
+3. Painel acumulava execuções concluídas/antigas sem forma de tirá-las de vista.
+
+**Duas decisões arquiteturais levadas ao usuário antes de codar, não decididas
+sozinho** (elicitação, 1 rodada, 2 perguntas fechadas): (a) o estado de "arquivada"
+persiste no **backend** (não `localStorage`) — decisão explícita do usuário, precisa
+sobreviver a troca de navegador/dispositivo; (b) arquivar é **reversível** — filtro
+"Arquivadas" + ação de desarquivar, nunca uma exclusão disfarçada. Ver ADR-011,
+Alternativas consideradas.
+
+`archived_at` (nullable) persiste no mesmo `.db` SQLite por chain, lido/escrito
+direto via `sqlite3` em `http_api.py` — mesmo padrão de desacoplamento já usado por
+`list_runs`/`get_run_detail` (ADR-004), fora do `StateStorePort`. Migração aditiva
+(`ALTER TABLE ... ADD COLUMN`, idempotente) roda sob demanda, cobrindo `.db` antigos
+e novos sem script de migração separado. Duas rotas novas
+(`POST /runs/{chain_name}/arquivar`/`.../desarquivar`, idempotentes, mesmo contrato
+de erro 404 de `cancelar`); `GET /runs` ganha `?archived=true` (default: exclui
+arquivadas, comportamento de hoje preservado); `GET /runs/{chain_name}` ganha
+`archived` (aditivo).
+
+`RunsList`/`RunDetail` passam a reconsultar `GET /runs`/`GET /runs/{chain_name}`
+sozinhos via `setTimeout` recursivo (não `setInterval` fixo — um `setInterval`
+decidiria se reagenda com o estado de uma rodada atrás, ainda não atualizado no
+instante em que o efeito roda; o `setTimeout` decide com o dado que acabou de
+chegar), enquanto houver algo `running`/`pending`; para sozinho quando não há mais
+nada ativo. `RunsList` ganhou um card "Arquivadas" na `summary-strip` (troca a
+própria consulta para `?archived=true`, não filtra em memória) e um botão
+"Arquivar"/"Desarquivar" por linha; `RunDetail` ganhou a mesma ação no cabeçalho.
+`StreamPanel` não mudou — continua com seu próprio SSE por step, independente deste
+polling.
+
+`101/101 testes do frontend` (12 novos: `apiClient.test.js` +4, `RunsList.test.jsx`
++4, `RunDetail.test.jsx` +4 — era 93 antes desta feature, com fake timers para as
+ACs de polling). `132/132 testes do backend` (5 novos em `test_http_api.py` — era
+127 antes). `npm run lint`/`npm run build`/`ruff check`/`ruff format` limpos.
+
+**Verificado num navegador real, não só em teste unitário**: `workflow serve` real
+(porta 8123) + `vite` dev server real (porta 5183) rodando simultaneamente, com uma
+chain real de 2 etapas (`shell_script_runner` com `sleep`, sem mock) disparada via
+`curl`. Painel avançou de "Em execução" para "Concluído" sozinho, sem nenhum clique
+em "Atualizar"; tela de detalhe aberta durante a execução avançou "passo-2 Em
+execução" → ambas as etapas "Concluído" sozinha, com o botão "Cancelar" sumindo ao
+virar terminal; arquivar pelo detalhe (vira "Desarquivar", detalhe continua
+acessível), arquivar pela listagem (some da lista padrão), aba "Arquivadas" (mostra
+só a arquivada) e desarquivar (volta para a listagem padrão) — todos confirmados
+visualmente de ponta a ponta, com screenshots do fluxo completo.
+
+## Sessão 2026-09-07 — ADR-010 (contexto `frontend`, `afeta: [motor-workflow]`): tema, Knowledge Bases, stream legível
+
+Três atritos relatados pelo usuário em conversa (elicitado via skill `issue-to-adr`,
+sem PRD — ver ADR-010, Contexto):
+
+1. `ThemeToggle` intercalado entre os botões de ação da topbar em vez de separado
+   deles.
+2. `SpecPicker` era uma lista de checkboxes rotulada "Specs de referência" — o usuário
+   pediu explicitamente o padrão `react-select` (combobox em barra, multi-seleção,
+   busca) rotulado **"Knowledge Bases"** (exemplo de código fornecido na própria
+   demanda).
+3. `StreamPanel` mostrava o `stream-json` bruto do `claude` CLI linha a linha; pedido
+   para identificar a plataforma agêntica do step e, por padrão, privilegiar leitura
+   (texto + rastros de ferramenta), com o log bruto disponível por opção.
+
+**Decisão de escopo registrada, não decidida sozinho**: a renomeação para "Knowledge
+Bases" troca só o rótulo visível (label do template YAML + textos do picker) —
+`docs_referenced`, `spec_multiselect` e o nome do arquivo `SpecPicker.jsx` continuam
+como estavam, sem ganho funcional em renomear identificadores internos agora (ADR-010,
+Contexto — Assunções registradas).
+
+`SpecPicker.jsx` foi reescrito sobre `react-select` (`unstyled`, estilizado 100% via
+`classNamePrefix="select"` contra os tokens já existentes em `index.css` — sem adotar
+o tema padrão da lib nem um design system externo). `GET /runs/{chain_name}` ganhou o
+campo aditivo `plugin` por item de `steps[]` (`get_run_detail`, `http_api.py`),
+resolvido do YAML da chain via `config_path` já persistido — mesma técnica que
+`_resolve_active_claude_step` (ADR-005) já usava para decidir se um step é
+"streamável", só que agora exposta na resposta em vez de só uma decisão interna.
+`lib/claudeStream.js` (novo) interpreta as linhas `stream-json` do `claude` CLI em
+turnos (texto/tool/summary), com fallback `raw` por linha não reconhecida — nunca
+lança. `StreamPanel.jsx` escolhe o formatador por um registro `{plugin: formatter}`;
+hoje só `claude_code_runner` tem entrada — sem formatador, ou linha não reconhecida,
+cai no `<pre>` de log bruto que já existia, preservado como alternância explícita
+("Ver log bruto"/"Ver leitura formatada"), nunca removido.
+
+`89/89 testes do frontend` (14 novos: `claudeStream.test.js` com 8 testes,
+`StreamPanel.test.jsx` +4, `SpecPicker.test.jsx` reescrito com 5 testes — era 75
+antes desta feature). `127/127 testes do backend` (2 novos:
+`test_get_run_detail_includes_plugin_per_step_adr010_ac08`,
+`test_get_run_detail_plugin_is_null_when_config_missing_adr010_ac08` — era 125
+antes). `npm run lint`/`npm run build`/`ruff check` limpos.
+
+**Verificado num navegador real, não só em teste unitário**: `workflow serve` real
+(porta 8123) + `vite` dev server real (porta 5183) rodando simultaneamente — o
+alternador de tema aparece à direita dos botões com divisor visual (claro e escuro);
+`GET /workflows` real confirmou `"label":"Knowledge Bases"`; o combobox `react-select`
+abre, busca, seleciona/remove múltiplos itens e é excluído da lista de opções ao ser
+selecionado (`fetch` de `docs-index.json` mockado no navegador para exercitar o caso
+com dados, já que não há um repositório de specs remoto real disponível neste
+ambiente); um run concluído (sem step `running`) confirmou que `StreamPanel` sem
+`plugin` se comporta exatamente como antes desta feature (regressão zero).
 
 ## Sessão 2026-09-06 — ADR-009 (contexto `frontend`, `afeta: [motor-workflow]`): config de boot + pasta de trabalho
 
@@ -164,7 +272,14 @@ Nenhuma pendente e bloqueante.
 
 ## Notes for Next Session
 
-Feature 006 está completa e verificada. Se uma nova demanda de frontend
-aparecer, a próxima ADR (em qualquer contexto) é `ADR-007` (numeração global,
-ver `../CONTEXT-MAP.md`). O rename pendente de `historia_id` (ADR-006,
-Consequências) segue em aberto, sem prazo definido.
+Feature 010 (ADR-011) está completa e verificada — ver a sessão mais recente no topo
+deste arquivo para detalhes (atualização automática por polling em `RunsList`/
+`RunDetail`, arquivamento reversível persistido no backend). Se uma nova demanda
+aparecer, a próxima ADR (em qualquer contexto) é `ADR-012` (numeração global, ver
+`../CONTEXT-MAP.md`). Pontos explicitamente fora de escopo em ADR-011: arquivamento
+em lote (é por execução nesta versão) e exclusão definitiva de execução (arquivar
+nunca apaga dado). Da ADR-010: suporte a qualquer plataforma agêntica além de
+`claude_code_runner` segue fora de escopo — o registro de formatadores em
+`StreamPanel.jsx` já está pronto para receber uma entrada nova sem redesenho. O
+rename pendente de `historia_id` (ADR-006, Consequências) segue em aberto, sem prazo
+definido.

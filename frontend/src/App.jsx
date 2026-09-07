@@ -35,7 +35,7 @@ export default function App() {
     <main className="dashboard">
       <header className="topbar">
         <div className="topbar__identity">
-          <h1>Painel de Controle — Motor de Workflow</h1>
+          <h1>Painel de Controle — Workflow</h1>
           <p className="topbar__endpoint" title="Motor de workflow em uso">
             {config.baseUrl}
           </p>
@@ -50,10 +50,12 @@ export default function App() {
               Atualizar
             </button>
           )}
-          <ThemeToggle />
           <button type="button" className="btn-secondary" onClick={() => setReconfiguring(true)}>
             Configurações
           </button>
+          {/* ADR-010-AC-01: separado do grupo de botões por um divisor, não intercalado entre eles. */}
+          <span className="topbar__divider" aria-hidden="true" />
+          <ThemeToggle />
         </div>
       </header>
 

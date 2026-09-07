@@ -35,7 +35,7 @@ describe('TemplateSelector (ADR-007 RF-01)', () => {
     const onSelect = vi.fn()
     render(<TemplateSelector onSelect={onSelect} />)
 
-    const select = await screen.findByLabelText('Workflow')
+    const select = await screen.findByLabelText('Disparar Execução Workflow')
     await userEvent.selectOptions(select, 'Investigar impacto')
 
     expect(onSelect).toHaveBeenCalledWith(TEMPLATES[0])

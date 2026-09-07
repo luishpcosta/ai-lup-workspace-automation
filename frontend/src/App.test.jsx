@@ -26,7 +26,7 @@ describe('App (ADR-006-AC-01, AC-02)', () => {
     )
     vi.spyOn(apiClient, 'getRuns').mockResolvedValue([])
     render(<App />)
-    expect(screen.getByText('Painel de Controle — Motor de Workflow')).toBeInTheDocument()
+    expect(screen.getByText('Painel de Controle — Workflow')).toBeInTheDocument()
     expect(screen.queryByRole('form', { name: 'Configuração' })).not.toBeInTheDocument()
     await screen.findByText('Nenhuma execução registrada ainda.')
   })

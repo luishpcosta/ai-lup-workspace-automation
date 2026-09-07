@@ -13,7 +13,7 @@
 # (ver application/workflow_templates.py::materialize_chain_raw).
 
 id: claude-implementar-local
-label: "Implementar (repositório local, PR pela CI do próprio repo)"
+label: "Implementar com Claude Code"
 description: >-
   Roda o Claude Code em modo coding contra um repositório local já existente,
   seguindo o fluxo de Git documentado nesse repositório (branch + push) — não
@@ -30,7 +30,7 @@ params_schema:
     type: textarea
     required: true
   - name: docs_referenced
-    label: "Specs de referência"
+    label: "Knowledge Bases"
     type: multiselect
     required: false
     source: spec_multiselect

@@ -19,7 +19,13 @@ controle web, implementado desde a ADR-006 — ver Planejamento).
   `/workspace/repos`, `/runs/from-template`), consumidas pelo redesenho do disparo no
   `frontend`; ADR-009 acrescenta o parâmetro de consulta opcional `root` a
   `GET /workspace/repos` (aditivo, retrocompatível) e faz `LOCAL_REPOS_ROOT` virar
-  fonte de default da raiz no `serve`.
+  fonte de default da raiz no `serve`; ADR-010 acrescenta o campo `plugin` por etapa em
+  `GET /runs/{chain_name}` (aditivo, retrocompatível), consumido pelo `StreamPanel` para
+  identificar a plataforma agêntica do step em execução; ADR-011 acrescenta o campo
+  `archived` a `GET /runs`/`GET /runs/{chain_name}`, o parâmetro de consulta opcional
+  `archived` a `GET /runs` e as rotas `POST /runs/{chain_name}/arquivar` e
+  `.../desarquivar` (tudo aditivo, retrocompatível), consumidos pelo `RunsList`/
+  `RunDetail` para arquivamento e atualização automática.
 
 ## Decisões (ADR)
 
@@ -30,9 +36,11 @@ em qualquer contexto, confira o maior número já usado nos dois diretórios aba
 - [Registro de decisões — motor-workflow](./backend/adr/) — ADR-001 a ADR-005,
   ADR-007 e ADR-008, todas em `contextos: [motor-workflow]` (ADR-007 também
   `contextos: [..., frontend]`, `afeta: [frontend]`).
-- [Registro de decisões — frontend](./frontend/adr/) — ADR-006 e ADR-009, ambas
-  `contextos: [frontend]`, `afeta: [motor-workflow]` (ADR-009 `depende_de:
-  [ADR-006, ADR-007]`) — próxima ADR nova, em qualquer contexto, é ADR-010.
+- [Registro de decisões — frontend](./frontend/adr/) — ADR-006, ADR-009, ADR-010 e
+  ADR-011, todas `contextos: [frontend]`, `afeta: [motor-workflow]` (ADR-009
+  `depende_de: [ADR-006, ADR-007]`; ADR-010 `depende_de: [ADR-005, ADR-006,
+  ADR-007]`; ADR-011 `depende_de: [ADR-006, ADR-007, ADR-010]`) — próxima ADR nova,
+  em qualquer contexto, é ADR-012.
 
 Ver `<contexto>/adr/ADR-00N-*.md` para o front matter de relação
 (`depende_de`/`afeta`/`supera`) de cada uma.
@@ -48,8 +56,16 @@ Ver `<contexto>/adr/ADR-00N-*.md` para o front matter de relação
   `frontend/constitution.md`, `frontend/init.sh`); [specs](./frontend/docs/specs/)
   — `docs/specs/006-frontend-painel-controle/{spec,plan,tasks}.md` (ADR-006,
   implementada), `docs/specs/007-selecao-template-execucao/{spec,plan,tasks}.md`
-  (ADR-007, redesenho do disparo por template/repo local/specs remotas) e
+  (ADR-007, redesenho do disparo por template/repo local/specs remotas),
   `docs/specs/008-config-boot-runtime-pasta-trabalho/{spec,plan,tasks}.md` (ADR-009,
   defaults de boot via `painel-config.json` + pasta de trabalho trocável em runtime —
-  implementada; contrato novo do lado `motor-workflow` é pequeno o bastante para não
-  abrir spec própria nesse contexto, documentado no `plan.md` desta feature).
+  implementada), `docs/specs/009-refinamentos-ux-stream-legivel/{spec,plan,tasks}.md`
+  (ADR-010, alternador de tema reposicionado, seletor "Knowledge Bases" sobre
+  `react-select` e stream ao vivo com leitura formatada por padrão + log bruto por
+  opção; contrato novo do lado `motor-workflow` é pequeno o bastante para não abrir
+  spec própria nesse contexto, documentado no `plan.md` desta feature) e
+  `docs/specs/010-atualizacao-arquivamento-execucoes/{spec,plan,tasks}.md` (ADR-011,
+  painel e detalhe de execuções atualizam sozinhos por polling enquanto há execução em
+  andamento, mais arquivamento/desarquivamento reversível persistido no backend; mesmo
+  padrão de contrato pequeno documentado no `plan.md`, sem spec própria em
+  `motor-workflow`).
