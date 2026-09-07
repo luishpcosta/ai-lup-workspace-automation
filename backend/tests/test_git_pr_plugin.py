@@ -16,9 +16,11 @@ class FakeRunner:
     def __init__(self, result: FakeResult):
         self.result = result
         self.calls: list = []
+        self.cwds: list = []
 
     def __call__(self, cmd, cwd=None, capture_output=False, text=False):
         self.calls.append(cmd)
+        self.cwds.append(cwd)
         return self.result
 
 
@@ -158,6 +160,70 @@ def test_title_over_256_chars_is_truncated():
     title = cmd[cmd.index("--title") + 1]
     assert len(title) == 256
     assert title.endswith("…")
+
+
+def test_confirm_pr_returns_confirmed_when_pr_exists_ac05():
+    runner = FakeRunner(
+        FakeResult(0, stdout='{"number": 7, "url": "https://github.com/org/app/pull/7"}\n')
+    )
+    plugin = git_pr.GitPrPlugin(run_command=runner)
+
+    context = make_context(
+        params={"action": "confirm_pr"},
+        input_data={"workspace_path": "/tmp/ws", "branch": "feature/x", "summary": "ok"},
+    )
+
+    output = plugin.run(context)
+
+    assert output["status"] == "confirmed"
+    assert output["pr_number"] == 7
+    assert output["pr_url"] == "https://github.com/org/app/pull/7"
+    # carry-forward: everything from context.input survives into output
+    assert output["summary"] == "ok"
+    cmd = runner.calls[0]
+    assert cmd[:3] == ["gh", "pr", "list"]
+    assert "--head" in cmd and "feature/x" in cmd
+    assert runner.cwds == ["/tmp/ws"]
+
+
+def test_confirm_pr_raises_transient_when_no_pr_found_yet_ac06():
+    runner = FakeRunner(FakeResult(0, stdout=""))
+    plugin = git_pr.GitPrPlugin(run_command=runner)
+
+    context = make_context(
+        params={"action": "confirm_pr"},
+        input_data={"workspace_path": "/tmp/ws", "branch": "feature/x"},
+    )
+
+    with pytest.raises(TransientError, match="feature/x"):
+        plugin.run(context)
+
+
+def test_confirm_pr_without_branch_raises_permanently_ac07():
+    runner = FakeRunner(FakeResult(0, stdout=""))
+    plugin = git_pr.GitPrPlugin(run_command=runner)
+
+    context = make_context(
+        params={"action": "confirm_pr"},
+        input_data={"workspace_path": "/tmp/ws"},
+    )
+
+    with pytest.raises(ValueError, match="branch"):
+        plugin.run(context)
+    assert runner.calls == []  # gh was never invoked
+
+
+def test_confirm_pr_transient_gh_failure_is_retriable():
+    runner = FakeRunner(FakeResult(1, stdout="", stderr="Could not resolve host: github.com"))
+    plugin = git_pr.GitPrPlugin(run_command=runner)
+
+    context = make_context(
+        params={"action": "confirm_pr"},
+        input_data={"workspace_path": "/tmp/ws", "branch": "feature/x"},
+    )
+
+    with pytest.raises(TransientError):
+        plugin.run(context)
 
 
 def test_gh_transient_failure_is_retriable():

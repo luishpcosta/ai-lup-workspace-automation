@@ -449,13 +449,17 @@ def build_app(
         ]
 
     @app.get("/workspace/repos")
-    def get_local_repos() -> list[dict]:
-        if not state.local_repos_root:
+    def get_local_repos(root: str | None = None) -> list[dict]:
+        # ADR-009 (AC-06): `root` troca a raiz listada sem reiniciar o processo. É um
+        # filtro de leitura, não estado do motor — o disparo usa o `repo_path` completo
+        # que chega no parâmetro do template. Ausente, vale a raiz do serve (ADR-007).
+        configured = root or state.local_repos_root
+        if not configured:
             return []
-        root = Path(state.local_repos_root)
-        if not root.is_dir():
+        base = Path(configured)
+        if not base.is_dir():
             return []
-        return [{"name": p.name, "path": str(p)} for p in sorted(root.iterdir()) if p.is_dir()]
+        return [{"name": p.name, "path": str(p)} for p in sorted(base.iterdir()) if p.is_dir()]
 
     @app.post("/runs/from-template", status_code=202)
     def create_run_from_template(body: FromTemplateRequest) -> dict:

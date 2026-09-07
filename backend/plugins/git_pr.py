@@ -1,6 +1,12 @@
-"""Git/PR plugin (ADR-002, AT-05; AC-12..AC-15).
+"""Git/PR plugin (ADR-002, AT-05; AC-12..AC-15. ADR-008, AT-02: `confirm_pr`).
 
-Creates/updates a Pull Request via the `gh` CLI. Flags verified against the
+Creates/updates a Pull Request via the `gh` CLI — or, for `action: confirm_pr`
+(ADR-008), only *verifies* one already exists (`gh pr list`), for flows where
+the PR is opened by something else entirely (the target repo's own CI): never
+calls `gh pr create`/`gh pr edit`, and skips the `title_template`/
+`body_template` rendering the other two actions require.
+
+Flags verified against the
 installed CLI (`gh 2.97.0`, `gh pr create --help` / `gh pr edit --help`):
 `create` takes `--label` (repeatable), `edit` takes `--add-label` instead —
 these are NOT interchangeable, unlike what a naive guess might assume. The
@@ -24,6 +30,7 @@ templating dependency for this POC.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -46,6 +53,9 @@ class GitPrPlugin(Plugin):
         input_data = context.input if isinstance(context.input, dict) else {}
         action = params["action"]
         cwd = input_data.get("workspace_path")
+
+        if action == "confirm_pr":
+            return {**input_data, **self._confirm_pr(input_data, cwd)}
 
         render_data = {**params, **input_data}
         title = self._truncate_title(self._render(params["title_template"], render_data))
@@ -125,6 +135,30 @@ class GitPrPlugin(Plugin):
             "pr_number": self._pr_number_from_url(pr_url),
             "pr_url": pr_url,
             "status": "created",
+        }
+
+    def _confirm_pr(self, input_data: dict, cwd: str | None) -> dict:
+        """ADR-008: verifies a PR was opened by some other means (the target
+        repo's own CI, typically) — never calls `gh pr create`. `branch` comes
+        from `context.input` (carry-forward from a preceding `coding_local`
+        step, ADR-008), since this plugin never decides branch names itself.
+        """
+        branch = input_data.get("branch")
+        if not branch:
+            raise ValueError("git_pr: 'branch' is required in context.input for action confirm_pr")
+
+        cmd = ["gh", "pr", "list", "--head", branch, "--json", "number,url", "--jq", ".[0]"]
+        result = self._run_command(cmd, cwd=cwd, capture_output=True, text=True)
+        self._raise_if_failed(result)
+
+        output = (result.stdout or "").strip()
+        if not output:
+            raise TransientError(f"git_pr: no PR found yet for branch {branch!r}")
+        payload = json.loads(output)
+        return {
+            "pr_number": payload.get("number"),
+            "pr_url": payload.get("url"),
+            "status": "confirmed",
         }
 
     def _update_pr(self, params: dict, title: str, body: str, cwd: str | None) -> dict:

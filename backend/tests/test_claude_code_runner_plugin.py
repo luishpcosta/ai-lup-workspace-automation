@@ -435,6 +435,100 @@ def test_investigar_mode_without_workspace_path_raises(tmp_path):
     assert factory.calls == []
 
 
+def test_coding_local_mode_reads_workspace_path_from_params_and_returns_branch_ac01_ac03(
+    tmp_path,
+):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [
+        system_line(),
+        result_line(
+            {
+                "summary": "implementado localmente",
+                "docs_referenced": ["005-x"],
+                "branch": "feature/minha-mudanca",
+            }
+        ),
+    ]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "corrija o bug X",
+            "docs_referenced": ["005-x"],
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="implementar",
+    )
+
+    output = plugin.run(context)
+
+    assert output["status"] == "success"
+    assert output["summary"] == "implementado localmente"
+    assert output["docs_referenced"] == ["005-x"]
+    assert output["branch"] == "feature/minha-mudanca"
+    assert output["workspace_path"] == str(workdir)
+    first_message = json.loads(factory.procs[0].stdin.lines[0])
+    content = first_message["message"]["content"]
+    assert "corrija o bug X" in content
+    assert "005-x" in content
+    # follows the target repo's own git workflow — never assumes a pre-created
+    # branch, and never opens the PR itself (that's the target repo's own CI)
+    assert "não abra a pull request" in content.lower()
+    assert "nunca dê push direto" in content.lower()
+
+
+def test_coding_local_mode_prefers_workspace_path_from_input_when_present(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [
+        result_line({"summary": "ok", "docs_referenced": [], "branch": "feature/x"}),
+    ]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "implemente",
+            "workspace_path": "/should/not/be/used",
+        },
+        input_data={"workspace_path": str(workdir)},
+        step_name="implementar",
+    )
+
+    plugin.run(context)
+
+    expected_log = workdir / ".workflow-logs" / "run-1" / "implementar.log"
+    assert expected_log.exists()
+
+
+def test_coding_local_mode_without_workspace_path_raises_ac02(tmp_path):
+    factory = FakePopenFactory(
+        [result_line({"summary": "ok", "docs_referenced": [], "branch": "feature/x"})]
+    )
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "implemente",
+        },
+        input_data=None,
+        step_name="implementar",
+    )
+
+    with pytest.raises(ValueError, match="workspace_path"):
+        plugin.run(context)
+    assert factory.calls == []
+
+
 def test_forwards_pending_instruction_to_stdin_ac04(tmp_path):
     workdir = tmp_path / "ws"
     workdir.mkdir()

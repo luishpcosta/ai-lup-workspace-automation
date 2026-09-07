@@ -72,6 +72,18 @@ def test_serve_subcommand_does_not_disturb_run_or_run_many_ac01():
     assert many_args.command == "run-many"
 
 
+def test_serve_local_repos_root_falls_back_to_env_and_flag_wins_adr009_ac08(monkeypatch):
+    """ADR-009-AC-08: LOCAL_REPOS_ROOT vira default; a flag explícita vence a variável."""
+    monkeypatch.setenv("LOCAL_REPOS_ROOT", "/raiz/do/ambiente")
+    assert build_parser().parse_args(["serve"]).local_repos_root == "/raiz/do/ambiente"
+
+    from_flag = build_parser().parse_args(["serve", "--local-repos-root", "/raiz/da/flag"])
+    assert from_flag.local_repos_root == "/raiz/da/flag"
+
+    monkeypatch.delenv("LOCAL_REPOS_ROOT")
+    assert build_parser().parse_args(["serve"]).local_repos_root is None
+
+
 def test_post_runs_is_async_and_completes_in_background_ac02(tmp_path):
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()

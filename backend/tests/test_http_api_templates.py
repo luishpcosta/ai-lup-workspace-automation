@@ -106,6 +106,64 @@ def test_get_local_repos_lists_subfolders_when_configured_ac02(tmp_path):
     assert names == {"ai-lup-poc-target-cli", "another-repo"}
 
 
+def test_get_local_repos_uses_root_query_param_over_configured_root_adr009_ac06(tmp_path):
+    """ADR-009-AC-06: `root` troca a raiz listada sem reiniciar o processo."""
+    configured_root = tmp_path / "configured"
+    (configured_root / "repo-do-serve").mkdir(parents=True)
+    other_root = tmp_path / "outra-arvore"
+    (other_root / "repo-a").mkdir(parents=True)
+    (other_root / "repo-b").mkdir()
+    (other_root / "arquivo.txt").write_text("x", encoding="utf-8")
+    app, _ = build_test_app(tmp_path, local_repos_root=str(configured_root))
+    client = TestClient(app)
+
+    response = client.get("/workspace/repos", params={"root": str(other_root)})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {r["name"] for r in body} == {"repo-a", "repo-b"}
+    assert [r["name"] for r in body] == sorted(r["name"] for r in body)
+    assert all(set(r) == {"name", "path"} for r in body)
+
+
+def test_get_local_repos_root_query_param_without_configured_root_adr009_ac06(tmp_path):
+    """ADR-009-AC-06: `root` funciona mesmo sem raiz configurada no serve."""
+    other_root = tmp_path / "arvore"
+    (other_root / "repo-a").mkdir(parents=True)
+    app, _ = build_test_app(tmp_path, local_repos_root=None)
+    client = TestClient(app)
+
+    response = client.get("/workspace/repos", params={"root": str(other_root)})
+
+    assert response.status_code == 200
+    assert [r["name"] for r in response.json()] == ["repo-a"]
+
+
+def test_get_local_repos_missing_root_stays_empty_list_not_error_adr009_ac06(tmp_path):
+    """ADR-009-AC-06: raiz inexistente responde 200 + lista vazia (semântica da AC-03)."""
+    app, _ = build_test_app(tmp_path, local_repos_root=None)
+    client = TestClient(app)
+
+    response = client.get("/workspace/repos", params={"root": str(tmp_path / "nao-existe")})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_local_repos_without_root_param_is_unchanged_adr009_ac07(tmp_path):
+    """ADR-009-AC-07: sem o parâmetro novo, a resposta é a de antes da ADR-009."""
+    repos_root = tmp_path / "repos"
+    (repos_root / "ai-lup-poc-target-cli").mkdir(parents=True)
+    (repos_root / "another-repo").mkdir()
+    app, _ = build_test_app(tmp_path, local_repos_root=str(repos_root))
+    client = TestClient(app)
+
+    response = client.get("/workspace/repos")
+
+    assert response.status_code == 200
+    assert {r["name"] for r in response.json()} == {"ai-lup-poc-target-cli", "another-repo"}
+
+
 def test_post_runs_from_template_dispatches_and_completes_ac04(tmp_path):
     app, watch_dir = build_test_app(tmp_path)
     client = TestClient(app)

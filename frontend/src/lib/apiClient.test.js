@@ -77,6 +77,31 @@ describe('apiClient — GET /workflows, GET /workspace/repos (ADR-007)', () => {
     await expect(getLocalRepos()).resolves.toEqual(repos)
     expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/workspace/repos')
   })
+
+  it('sends the configured working folder as ?root= (ADR-009-AC-06)', async () => {
+    setConfig({
+      baseUrl: 'http://localhost:8000',
+      specsBaseUrl: 'https://example.test/docs',
+      reposRoot: 'C:/dev/local workflow',
+    })
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, []))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getLocalRepos()
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://localhost:8000/workspace/repos?root=C%3A%2Fdev%2Flocal%20workflow',
+    )
+  })
+
+  it('omits ?root= when no working folder is configured (ADR-009-AC-07)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, []))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getLocalRepos()
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/workspace/repos')
+  })
 })
 
 describe('apiClient — POST /runs/from-template (ADR-007)', () => {

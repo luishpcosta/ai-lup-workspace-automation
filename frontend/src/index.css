@@ -17,6 +17,13 @@
   --warn: #d9631e; /* laranja — falha/atenção, único sinal de status */
   --warn-soft: rgba(217, 99, 30, 0.12);
   --warn-strong: #b74f16;
+  --warn-row: rgba(217, 99, 30, 0.05);
+
+  --ok: #4f7a52; /* verde dessaturado — só o ponto de "concluído" */
+  --row-hover: rgba(28, 20, 23, 0.035);
+  --skeleton: rgba(28, 20, 23, 0.07);
+
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%23766e72' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -32,6 +39,43 @@
   font: 15px/1.55 system-ui, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Modo escuro — mesma dupla bordô/laranja, clareada para contraste sobre
+   fundo escuro; superfícies elevadas via tinta de branco translúcido em vez
+   de cinzas fixos (a mesma tinta funciona em qualquer nível de elevação). */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #241b1f;
+  --bg-subtle: #150f12;
+  --text: #f2ecee;
+  --text-muted: #ab9ea3;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --accent: #c85c7c;
+  --accent-hover: #d87390;
+  --accent-soft: rgba(200, 92, 124, 0.16);
+  --accent-contrast: #1c1013;
+
+  --warn: #e8813f;
+  --warn-soft: rgba(232, 129, 63, 0.18);
+  --warn-strong: #f4a672;
+  --warn-row: rgba(232, 129, 63, 0.09);
+
+  --ok: #7fae83;
+  --row-hover: rgba(255, 255, 255, 0.045);
+  --skeleton: rgba(255, 255, 255, 0.08);
+
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%23ab9ea3' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  --shadow-sm:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 1px 1px rgba(0, 0, 0, 0.2);
+  --shadow-md:
+    0 4px 14px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -40,12 +84,210 @@ body {
   margin: 0;
   background: var(--bg-subtle);
   color: var(--text);
+  transition:
+    background-color 160ms ease-out,
+    color 160ms ease-out;
 }
 
 #root {
-  max-width: 960px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 24px 24px 64px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Tipografia ---------- */
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: 19px;
+}
+
+h2 {
+  font-size: 15px;
+  letter-spacing: -0.005em;
+}
+
+h3 {
+  font-size: 13px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+p {
+  margin: 0 0 8px;
+}
+
+/* ---------- Shell do painel ---------- */
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar__identity {
+  min-width: 0;
+}
+
+/* O endpoint fica visível o tempo todo: em uso local é comum ter mais de um
+   motor rodando, e descobrir que se apontou para o errado só depois de
+   disparar é caro. */
+.topbar__endpoint {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.dashboard__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.dashboard__aside {
+  position: sticky;
+  top: 24px;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 940px) {
+  .dashboard__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard__aside {
+    position: static;
+  }
+}
+
+/* ---------- Faixa de resumo (também é o filtro da fila) ---------- */
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  text-align: left;
+  align-self: stretch;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  font-weight: 400;
+  transition:
+    border-color 120ms ease-out,
+    background-color 120ms ease-out;
+}
+
+.summary-card:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.summary-card[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.summary-card__value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-card__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Hierarquia: cor só quando o número pede ação. Um zero colorido chama atenção
+   para o que justamente não está acontecendo — então zero fica neutro, e
+   "em execução"/"falharam" só puxam o olho quando há de fato o que olhar. */
+.summary-card--running[data-zero='false'] .summary-card__value {
+  color: var(--accent);
+}
+
+.summary-card--failed[data-zero='false'] .summary-card__value {
+  color: var(--warn-strong);
+}
+
+.summary-card--failed[aria-pressed='true'] {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+/* "Total" é o estado de repouso da fila, não um filtro que o operador escolheu:
+   marca-se como ativo para leitores de tela, mas sem a tinta de marca, que
+   pertence ao que exige ação. */
+.summary-card--neutral[aria-pressed='true'] {
+  border-color: var(--border-strong);
+  background: var(--bg);
+}
+
+/* ---------- Painéis ---------- */
+
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  margin: 0;
+}
+
+/* Painel que hospeda uma tabela: a tabela encosta na borda, sem respiro duplo. */
+.panel--flush {
+  padding: 0;
+  overflow: hidden;
 }
 
 .settings-screen {
@@ -56,68 +298,83 @@ body {
 
 .settings-screen .panel {
   width: 100%;
-  max-width: 380px;
+  max-width: 460px;
+  padding: 20px;
+}
+
+.settings-screen h1 {
+  margin-bottom: 4px;
 }
 
 .settings-hint {
   color: var(--text-muted);
   font-size: 13px;
-  margin-top: -4px;
+  margin: 0;
 }
 
-header {
+.settings-form {
+  gap: 18px;
+}
+
+.field__label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field__optional {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* AC-04: um valor que veio do painel-config.json precisa se anunciar como default,
+   senão o usuário lê como algo que ele mesmo digitou. */
+.field__badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.settings-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  margin-bottom: 24px;
 }
 
-h1,
-h2,
-h3 {
-  margin: 0 0 4px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+.settings-footnote {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
 }
 
-h1 {
-  font-size: 20px;
-}
-
-h2 {
-  font-size: 18px;
-  letter-spacing: -0.015em;
-}
-
-h3 {
-  font-size: 15px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
-}
-
-p {
-  margin: 0 0 8px;
-}
-
-/* Painéis (cards): tabela, formulário de disparo, stream — elevação por sombra
-   suave em vez de borda grossa colorida. */
-.panel {
-  background: var(--bg);
+code {
+  font-family: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  font-size: 0.92em;
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  padding: 16px;
-  margin: 0 0 20px;
+  border-radius: 4px;
+  padding: 1px 5px;
 }
+
+/* ---------- Formulários ---------- */
 
 form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 480px;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 label {
@@ -127,8 +384,10 @@ label {
 }
 
 input[type='text'],
-textarea {
+textarea,
+select {
   font: inherit;
+  width: 100%;
   padding: 9px 12px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -136,12 +395,78 @@ textarea {
   color: var(--text);
 }
 
+textarea {
+  resize: vertical;
+  min-height: 84px;
+}
+
+select {
+  appearance: none;
+  padding-right: 32px;
+  background-image: var(--select-caret);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
 input[type='text']:focus-visible,
 textarea:focus-visible,
-button:focus-visible {
+select:focus-visible,
+button:focus-visible,
+tr:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+.field .settings-hint {
+  margin-top: 2px;
+}
+
+/* Mensagens que os pickers renderizam no lugar do controle (carregando, lista
+   vazia, erro) — mesmo peso de texto auxiliar, não de conteúdo do formulário. */
+.field > p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.field > p[role='alert'] {
+  color: var(--warn-strong);
+  background: var(--warn-soft);
+  padding: 7px 10px;
+}
+
+/* Lista de checkboxes (SpecPicker) — cabe numa caixa com rolagem própria em vez
+   de esticar o formulário indefinidamente conforme o repositório de specs cresce. */
+ul[aria-label='Specs de referência'] {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  gap: 2px;
+}
+
+ul[aria-label='Specs de referência'] label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 3px 0;
+}
+
+input[type='checkbox'] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+/* ---------- Botões ---------- */
 
 button {
   font: inherit;
@@ -178,6 +503,8 @@ button[type='submit']:hover:not(:disabled) {
   background: var(--bg);
   color: var(--text);
   border-color: var(--border-strong);
+  font-size: 14px;
+  padding: 7px 13px;
 }
 
 .btn-secondary:hover:not(:disabled) {
@@ -197,6 +524,86 @@ button[type='submit']:hover:not(:disabled) {
   background: var(--warn-soft);
 }
 
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.theme-toggle {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.theme-toggle--floating {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 10;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- Status ---------- */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+
+.status--completed .status__dot,
+.status__dot--completed {
+  background: var(--ok);
+}
+
+.status--failed .status__dot,
+.status__dot--failed {
+  background: var(--warn);
+}
+
+.status--running .status__dot,
+.status__dot--running {
+  background: var(--accent);
+}
+
+.status--failed {
+  color: var(--warn-strong);
+  font-weight: 600;
+}
+
+/* ---------- Tabelas ---------- */
+
 table {
   border-collapse: collapse;
   width: 100%;
@@ -206,17 +613,38 @@ table {
 th,
 td {
   text-align: left;
-  padding: 8px 12px;
+  padding: 11px 16px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
 }
 
 th {
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--text-muted);
   font-weight: 600;
+  background: var(--bg-subtle);
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.col-time {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.run-name {
+  display: block;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.run-workflow {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 1px;
 }
 
 tr.row-clickable {
@@ -224,23 +652,182 @@ tr.row-clickable {
 }
 
 tr.row-clickable:hover {
-  background: var(--bg-subtle);
-}
-
-tr.run-row-failed.row-clickable:hover {
-  background: var(--warn-soft);
-  filter: brightness(0.97);
+  background: var(--row-hover);
 }
 
 tr:last-child td {
   border-bottom: none;
 }
 
-/* Único sinal de status: laranja, discreto (tinta de fundo, não borda grossa). */
+/* AC-12 — destaque passivo de falha: marcador na borda inicial da linha mais o
+   ponto laranja de status. Tinta de fundo mínima, só o suficiente para a linha
+   saltar numa varredura rápida sem virar uma faixa colorida. */
 tr.run-row-failed {
+  background: var(--warn-row);
+}
+
+tr.run-row-failed td:first-child {
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+tr.run-row-failed.row-clickable:hover {
+  background: var(--warn-soft);
+}
+
+/* ---------- Estados (carregando / vazio / erro) ---------- */
+
+.state-block {
+  margin: 0;
+  padding: 20px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.state-block--empty {
+  text-align: center;
+}
+
+p[role='alert'].state-block {
+  border-color: var(--warn);
   background: var(--warn-soft);
   color: var(--warn-strong);
   font-weight: 600;
+  text-align: left;
+}
+
+/* Esqueleto com a geometria da tabela real (linha + coluna de tempo à direita),
+   não caixas cinzas genéricas. */
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.skeleton-row:last-child {
+  border-bottom: none;
+}
+
+.skeleton {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--skeleton);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton--wide {
+  width: 42%;
+}
+
+.skeleton--narrow {
+  width: 68px;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ---------- Log de disparo ---------- */
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dispatch-log {
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.dispatch-log__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.dispatch-log__item .status__dot {
+  align-self: center;
+}
+
+.dispatch-log__text {
+  overflow-wrap: anywhere;
+}
+
+.dispatch-log__item--error {
+  color: var(--warn-strong);
+  font-weight: 600;
+}
+
+/* ---------- Detalhe de execução ---------- */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.detail > .btn-secondary {
+  align-self: flex-start;
+}
+
+.detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.detail__identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.detail__identity h2 {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.detail__section-title {
+  margin-bottom: -6px;
+}
+
+.col-attempts {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.col-error {
+  color: var(--text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+tr[data-status='failed'] .col-error {
+  color: var(--warn-strong);
+}
+
+.stream .section-head {
+  margin-bottom: 12px;
 }
 
 pre {
@@ -253,15 +840,7 @@ pre {
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 13px;
-}
-
-ul {
-  list-style: none;
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 [role='alert'] {
@@ -274,4 +853,16 @@ p[role='alert'] {
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   margin: 4px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body,
+  button,
+  .summary-card {
+    transition: none;
+  }
+
+  .skeleton {
+    animation: none;
+  }
 }

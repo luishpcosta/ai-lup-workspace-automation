@@ -3,9 +3,48 @@
 ## Current State
 
 **Last Updated:** 2026-09-06
-**Active Feature:** 007-selecao-template-execucao — Disparo por template, specs remotas e repositórios locais — Verify, `done`
+**Active Feature:** 008-config-boot-runtime-pasta-trabalho — Configuração de boot em runtime e pasta de trabalho — Verify, `done`
 **Active SDD Phase:** Verify
-**Pending Gate:** Nenhum. Todas as 10 ACs (AC-01 a AC-10) implementadas e verificadas — ver `docs/specs/007-selecao-template-execucao/tasks.md`.
+**Pending Gate:** Nenhum. Todas as 8 ACs (AC-01 a AC-08) implementadas e verificadas — ver `docs/specs/008-config-boot-runtime-pasta-trabalho/tasks.md`.
+
+## Sessão 2026-09-06 — ADR-009 (contexto `frontend`, `afeta: [motor-workflow]`): config de boot + pasta de trabalho
+
+Pedido do usuário durante uma sessão de retoque visual do painel: instalação nova exige
+digitar as duas URLs à mão sempre, os campos da tela de configuração usavam
+**placeholder com valor real** (lido como se já estivesse preenchido), e a raiz de
+repositórios locais só existia como flag de linha de comando — sem ela, o seletor de
+repositórios ficava vazio sem forma de corrigir a não ser resubir o backend.
+
+**Conflito de constituição levantado antes de codar, não contornado**: a alternativa
+óbvia para os defaults (`.env` do Vite) viola o princípio 6 (`import.meta.env` é
+assado no bundle); a alternativa óbvia para a raiz trocável (rota `PUT` nova) esbarra
+no princípio 5 (rota nova exige ADR). As duas decisões foram levadas ao usuário antes
+da implementação (ver ADR-009, Alternativas consideradas).
+
+`lib/config.js` ganhou uma segunda fonte de valores (`public/painel-config.json`,
+arquivo estático lido por `fetch` no boot, nunca `import.meta.env`) com precedência
+`localStorage` > arquivo > vazio, **campo a campo** — salvar só o `baseUrl` não apaga o
+default do `specsBaseUrl`. `SettingsScreen.jsx` foi redesenhada: selo "default do
+arquivo" por campo, zero `placeholder`, campo novo de pasta de trabalho, botão
+"Restaurar defaults do arquivo". No motor, `GET /workspace/repos` ganhou `?root=`
+opcional (aditivo, retrocompatível — é filtro de leitura, não estado do processo) e
+`--local-repos-root` passou a ter `LOCAL_REPOS_ROOT` como fonte de default.
+
+Investigação que mudou o desenho: `local_repos_root` só é lido por
+`GET /workspace/repos` — não é estado do motor (o disparo usa o `repo_path` completo
+recebido por parâmetro). Isso é o que permitiu resolver a troca por parâmetro de
+consulta em vez de uma rota de escrita com estado mutável no servidor.
+
+`75/75 testes do frontend` (14 novos: `config.test.js` ganhou uma segunda `describe`
+com 7 testes de AC-01 a AC-05, `apiClient.test.js` +2, `SettingsScreen.test.jsx` +5 —
+era 61 antes desta feature). `125/125 testes do backend` (5 novos:
+`test_http_api_templates.py` +4 para AC-06/AC-07, `test_http_api.py` +1 para AC-08 —
+era 120 antes). `npm run lint`/`ruff` limpos.
+
+**Verificado de ponta a ponta, não só em teste unitário**: backend real subido com
+`LOCAL_REPOS_ROOT` no ambiente (sem flag) confirmou o seletor populado; troca da pasta
+de trabalho pela tela, com o backend já rodando, confirmou o seletor trocando de árvore
+via `?root=` sem reiniciar nada; reload da página confirmou a raiz persistida.
 
 ## Sessão 2026-09-06 — ADR-007 (contexto `motor-workflow`, `afeta: [frontend]`): disparo por template
 

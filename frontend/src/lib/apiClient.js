@@ -72,8 +72,13 @@ export function getWorkflows() {
   return request('/workflows')
 }
 
+// ADR-009-AC-06: a pasta de trabalho escolhida vai como `?root=`. Sem raiz escolhida,
+// a chamada sai sem o parâmetro e o backend usa a raiz do próprio processo
+// (--local-repos-root / LOCAL_REPOS_ROOT) — o comportamento de antes da ADR-009.
 export function getLocalRepos() {
-  return request('/workspace/repos')
+  const { reposRoot } = requireConfig()
+  const query = reposRoot ? `?root=${encodeURIComponent(reposRoot)}` : ''
+  return request(`/workspace/repos${query}`)
 }
 
 export function createRunFromTemplate(templateId, params) {

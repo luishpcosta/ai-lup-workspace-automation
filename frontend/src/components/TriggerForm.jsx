@@ -42,20 +42,35 @@ export default function TriggerForm({ onDispatched }) {
   }
 
   return (
-    <section>
-      <h2>Disparar execução</h2>
+    <section className="trigger">
+      <div className="section-head">
+        <h2>Disparar execução</h2>
+      </div>
       <form onSubmit={handleSubmit} aria-label="Disparar execução" className="panel">
         <TemplateSelector value={template?.id} onSelect={handleSelectTemplate} />
         <DynamicParamsForm template={template} values={values} onChange={handleParamChange} />
         <button type="submit" className="btn-primary" disabled={submitting || !template}>
-          Disparar
+          {submitting ? 'Disparando…' : 'Disparar'}
         </button>
         {results.length > 0 && (
-          <ul aria-label="Resultado do disparo">
+          <ul aria-label="Resultado do disparo" className="dispatch-log">
             {results.map((result) => (
-              <li key={result.id}>
-                {result.status === 'success' && `iniciado (${result.chainName})`}
-                {result.status === 'error' && <span role="alert">{result.message}</span>}
+              <li
+                key={result.id}
+                className={`dispatch-log__item dispatch-log__item--${result.status}`}
+              >
+                {result.status === 'success' && (
+                  <>
+                    <span className="status__dot status__dot--running" aria-hidden="true" />
+                    <span className="dispatch-log__text">iniciado ({result.chainName})</span>
+                  </>
+                )}
+                {result.status === 'error' && (
+                  <>
+                    <span className="status__dot status__dot--failed" aria-hidden="true" />
+                    <span role="alert">{result.message}</span>
+                  </>
+                )}
               </li>
             ))}
           </ul>

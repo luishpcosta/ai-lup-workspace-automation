@@ -81,6 +81,16 @@ _INVESTIGAR_SCHEMA = {
     "required": ["relatorio", "docs_consultados"],
 }
 
+_CODING_LOCAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "docs_referenced": {"type": "array", "items": {"type": "string"}},
+        "branch": {"type": "string"},
+    },
+    "required": ["summary", "docs_referenced", "branch"],
+}
+
 #: exit-code!=0 whose output matches one of these is treated as retriable;
 #: anything else is a permanent failure.
 _TRANSIENT_PATTERNS = ("rate_limit", "econnreset", "timeout", "network", "overloaded")
@@ -113,6 +123,8 @@ class ClaudeCodeRunnerPlugin(Plugin):
             return self._run_review(context)
         if modo == "investigar":
             return self._run_investigar(context)
+        if modo == "coding_local":
+            return self._run_coding_local(context)
         raise ValueError(f"claude_code_runner: invalid modo {modo!r}")
 
     # -- modo coding (ADR-002-AT-02, AC-04/AC-05) ---------------------------
@@ -257,6 +269,72 @@ class ClaudeCodeRunnerPlugin(Plugin):
             "JSON com 'relatorio' (texto da análise/impacto encontrado) e "
             "'docs_consultados' (lista dos ids de documentos efetivamente consultados "
             "via MCP)."
+        )
+
+    # -- modo coding_local (ADR-008, AT-01) ----------------------------------
+
+    def _run_coding_local(self, context: PluginContext) -> dict:
+        """Implements against an already-existing local checkout — no preceding
+        `workspace_setup` step (no clone, no branch created by the motor): the
+        target repo's own git workflow decides branch naming, and the agent is
+        the one who creates/pushes it, so the motor learns the branch name only
+        from the agent's own structured output (`branch`, ADR-008 Decisão).
+        Unlike `coding`, this never opens a PR itself — a downstream `git_pr`
+        `confirm_pr` step (not `create_pr`) verifies the target repo's own CI
+        opened one.
+        """
+        params = context.params
+        input_data = context.input if isinstance(context.input, dict) else {}
+        workdir = input_data.get("workspace_path") or params.get("workspace_path")
+        if not workdir:
+            raise ValueError(
+                "claude_code_runner (coding_local): no workspace_path in context.input "
+                "or context.params"
+            )
+        prompt_text = params["prompt"]
+        docs_referenced = params.get("docs_referenced") or []
+        mcp_config_path = params["mcp_config_path"]
+
+        log_path = self._session_log_path(workdir, context.run_id, context.step_name)
+        instructions_path = self._instructions_path(workdir, context.run_id, context.step_name)
+        cmd = self._build_cmd(mcp_config_path, _CODING_LOCAL_SCHEMA)
+        prompt = self._coding_local_prompt(prompt_text, docs_referenced)
+
+        returncode, lines = self._run_streaming_session(
+            cmd, workdir, log_path, instructions_path, prompt
+        )
+        self._raise_if_failed(returncode, lines, log_path)
+        result = self._extract_structured(self._find_result_event(lines), log_path)
+
+        return {
+            "status": "success",
+            "summary": result.get("summary", ""),
+            "docs_referenced": result.get("docs_referenced", []),
+            "branch": result.get("branch", ""),
+            "workspace_path": str(workdir),
+            "session_log_path": str(log_path),
+        }
+
+    def _coding_local_prompt(self, prompt_text: str, docs_referenced: list) -> str:
+        docs_hint = (
+            f" Consulte especificamente, via MCP, os documentos: {', '.join(docs_referenced)}."
+            if docs_referenced
+            else ""
+        )
+        return (
+            f"Implemente: {prompt_text}{docs_hint} Este repositório já tem seu próprio "
+            "fluxo de Git documentado (leia o CLAUDE.md/README relevante antes de "
+            "começar, especialmente qualquer seção sobre fluxo de Git) — siga "
+            "exatamente esse fluxo: nunca dê push direto na branch principal; "
+            "crie (ou troque para) a branch apropriada segundo a convenção desse "
+            "repositório. Depois de implementar e verificar (rode a verificação "
+            "própria do repositório), faça `git commit` das mudanças e `git push` "
+            "dessa branch para o remoto `origin`. Não abra a Pull Request você "
+            "mesmo — este repositório já abre a PR automaticamente por conta "
+            "própria depois do push; sua responsabilidade termina no push. Ao "
+            "final, retorne um JSON com 'summary' (resumo do que foi feito), "
+            "'docs_referenced' (ids de documentos efetivamente consultados) e "
+            "'branch' (nome exato da branch para a qual você deu push)."
         )
 
     # -- shared plumbing -------------------------------------------------
