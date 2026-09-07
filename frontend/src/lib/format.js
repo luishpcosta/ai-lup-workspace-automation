@@ -52,3 +52,15 @@ export function formatAbsoluteTime(value) {
   if (!date) return value ?? ''
   return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
+
+// pt-BR, compacto: "45s", "2min 14s", "1h 03min" — sem casas decimais, sem "e".
+export function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return '—'
+  const total = Math.max(0, Math.round(seconds))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}min`
+  if (m > 0) return `${m}min ${String(s).padStart(2, '0')}s`
+  return `${s}s`
+}

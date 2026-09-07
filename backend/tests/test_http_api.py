@@ -1,3 +1,4 @@
+import sqlite3
 import time
 
 from fastapi.testclient import TestClient
@@ -217,6 +218,7 @@ def test_get_run_detail_includes_plugin_per_step_adr010_ac08(tmp_path):
         "status",
         "created_at",
         "updated_at",
+        "duration_seconds",
         "steps",
         "archived",
     }
@@ -246,6 +248,116 @@ def test_get_run_detail_plugin_is_null_when_config_missing_adr010_ac08(tmp_path)
     config.unlink()
     detail = client.get("/runs/wf-noconfig").json()
     assert detail["steps"][0]["plugin"] is None
+
+
+def _set_run_timestamps(db_file, run_id, created_at, updated_at):
+    conn = sqlite3.connect(db_file)
+    try:
+        conn.execute(
+            "UPDATE workflow_runs SET created_at = ?, updated_at = ? WHERE run_id = ?",
+            (created_at, updated_at, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_duration_seconds_is_fixed_for_completed_run_adr012_ac01_ac02_ac03(tmp_path):
+    """ADR-012-AC-01/AC-02/AC-03: para uma execução terminada, `duration_seconds` é
+    aditivo em GET /runs e GET /runs/{chain_name}, e fixo (updated_at - created_at)
+    em chamadas repetidas — fixamos os timestamps direto no `.db` para eliminar
+    qualquer flakiness de timing."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    config = write_chain(tmp_path, "c.yaml", "wf-duration-done", "echo")
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(config)})
+    assert wait_for(
+        lambda: client.get("/runs/wf-duration-done").json().get("status") == "completed"
+    )
+    run_id = client.get("/runs/wf-duration-done").json()["run_id"]
+    _set_run_timestamps(
+        watch_dir / "wf-duration-done.db",
+        run_id,
+        "2026-01-01T00:00:00+00:00",
+        "2026-01-01T00:01:30+00:00",
+    )
+
+    for _ in range(2):
+        listed = next(
+            r for r in client.get("/runs").json() if r["chain_name"] == "wf-duration-done"
+        )
+        assert listed["duration_seconds"] == 90
+        detail = client.get("/runs/wf-duration-done").json()
+        assert detail["duration_seconds"] == 90
+
+
+def test_duration_seconds_for_running_run_never_decreases_adr012_ac04(tmp_path):
+    """ADR-012-AC-04: para uma execução em andamento, `duration_seconds` é calculado
+    a partir de `now()` a cada chamada — não fixo — e nunca diminui entre chamadas."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "blocking.py", BLOCKING_PLUGIN_SOURCE)
+    started = tmp_path / "started.flag"
+    release = tmp_path / "release.flag"
+    config = write_chain(
+        tmp_path, "c.yaml", "wf-duration-running", "blocking", blocking_params(started, release)
+    )
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(config)})
+    assert wait_for(started.exists)
+
+    first = client.get("/runs/wf-duration-running").json()
+    assert first["status"] == "running"
+    assert first["duration_seconds"] is not None
+    assert first["duration_seconds"] >= 0
+
+    time.sleep(1.1)
+    second = client.get("/runs/wf-duration-running").json()
+    assert second["duration_seconds"] >= first["duration_seconds"]
+
+    listed = next(r for r in client.get("/runs").json() if r["chain_name"] == "wf-duration-running")
+    assert listed["duration_seconds"] >= second["duration_seconds"]
+
+    release.touch()
+    assert wait_for(
+        lambda: client.get("/runs/wf-duration-running").json().get("status") == "completed"
+    )
+
+
+def test_duration_seconds_is_null_when_created_at_corrupted_adr012_ac05(tmp_path):
+    """ADR-012-AC-05: `created_at` corrompido/não-parseável não derruba a resposta —
+    `duration_seconds` degrada para `null`."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    write_plugin(plugins_dir, "echo.py", ECHO_PLUGIN_SOURCE)
+    config = write_chain(tmp_path, "c.yaml", "wf-duration-corrupt", "echo")
+    watch_dir = tmp_path / "watch"
+    app = build_app(plugins_dir=str(plugins_dir), watch_dir=str(watch_dir))
+    client = TestClient(app)
+
+    client.post("/runs", json={"config_path": str(config)})
+    assert wait_for(
+        lambda: client.get("/runs/wf-duration-corrupt").json().get("status") == "completed"
+    )
+    run_id = client.get("/runs/wf-duration-corrupt").json()["run_id"]
+    _set_run_timestamps(watch_dir / "wf-duration-corrupt.db", run_id, "not-a-date", "not-a-date")
+
+    listed_resp = client.get("/runs")
+    assert listed_resp.status_code == 200
+    listed = next(r for r in listed_resp.json() if r["chain_name"] == "wf-duration-corrupt")
+    assert listed["duration_seconds"] is None
+
+    detail_resp = client.get("/runs/wf-duration-corrupt")
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["duration_seconds"] is None
 
 
 def test_get_run_detail_unknown_chain_ac07(tmp_path):
@@ -493,6 +605,7 @@ def test_get_run_detail_includes_archived_field_adr011_ac07(tmp_path):
         "status",
         "created_at",
         "updated_at",
+        "duration_seconds",
         "steps",
         "archived",
     }

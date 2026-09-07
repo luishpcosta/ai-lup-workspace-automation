@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { archiveRun, getRuns, unarchiveRun } from '../lib/apiClient'
-import { describeStatus, formatAbsoluteTime, formatRelativeTime } from '../lib/format'
+import { describeStatus, formatAbsoluteTime, formatDuration, formatRelativeTime } from '../lib/format'
 
 // ADR-006-AT-02 / AC-04 (listagem), AC-12 (destaque visual passivo de falha).
 // A faixa de resumo acumula duas funções de propósito: mostra a contagem por
@@ -170,6 +170,9 @@ export default function RunsList({ onSelect, refreshToken }) {
               <tr>
                 <th scope="col">Execução</th>
                 <th scope="col">Status</th>
+                <th scope="col" className="col-duration">
+                  Duração
+                </th>
                 <th scope="col" className="col-time">
                   Atualizado
                 </th>
@@ -207,6 +210,7 @@ export default function RunsList({ onSelect, refreshToken }) {
                         {status.label}
                       </span>
                     </td>
+                    <td className="col-duration">{formatDuration(run.duration_seconds)}</td>
                     <td className="col-time" title={formatAbsoluteTime(run.updated_at)}>
                       {formatRelativeTime(run.updated_at)}
                     </td>
