@@ -25,7 +25,10 @@ controle web, implementado desde a ADR-006 — ver Planejamento).
   `archived` a `GET /runs`/`GET /runs/{chain_name}`, o parâmetro de consulta opcional
   `archived` a `GET /runs` e as rotas `POST /runs/{chain_name}/arquivar` e
   `.../desarquivar` (tudo aditivo, retrocompatível), consumidos pelo `RunsList`/
-  `RunDetail` para arquivamento e atualização automática.
+  `RunDetail` para arquivamento e atualização automática; ADR-012 acrescenta o campo
+  `duration_seconds` a `GET /runs`/`GET /runs/{chain_name}` (aditivo, retrocompatível,
+  derivado em tempo de leitura de `created_at`/`updated_at` já existentes, sem coluna
+  nova), consumido pelo `RunsList` para a coluna "Duração".
 
 ## Decisões (ADR)
 
@@ -36,11 +39,12 @@ em qualquer contexto, confira o maior número já usado nos dois diretórios aba
 - [Registro de decisões — motor-workflow](./backend/adr/) — ADR-001 a ADR-005,
   ADR-007 e ADR-008, todas em `contextos: [motor-workflow]` (ADR-007 também
   `contextos: [..., frontend]`, `afeta: [frontend]`).
-- [Registro de decisões — frontend](./frontend/adr/) — ADR-006, ADR-009, ADR-010 e
-  ADR-011, todas `contextos: [frontend]`, `afeta: [motor-workflow]` (ADR-009
+- [Registro de decisões — frontend](./frontend/adr/) — ADR-006, ADR-009, ADR-010,
+  ADR-011 e ADR-012, todas `contextos: [frontend]`, `afeta: [motor-workflow]` (ADR-009
   `depende_de: [ADR-006, ADR-007]`; ADR-010 `depende_de: [ADR-005, ADR-006,
-  ADR-007]`; ADR-011 `depende_de: [ADR-006, ADR-007, ADR-010]`) — próxima ADR nova,
-  em qualquer contexto, é ADR-012.
+  ADR-007]`; ADR-011 `depende_de: [ADR-006, ADR-007, ADR-010]`; ADR-012
+  `depende_de: [ADR-006, ADR-011]`) — próxima ADR nova, em qualquer contexto, é
+  ADR-013.
 
 Ver `<contexto>/adr/ADR-00N-*.md` para o front matter de relação
 (`depende_de`/`afeta`/`supera`) de cada uma.
@@ -68,4 +72,7 @@ Ver `<contexto>/adr/ADR-00N-*.md` para o front matter de relação
   painel e detalhe de execuções atualizam sozinhos por polling enquanto há execução em
   andamento, mais arquivamento/desarquivamento reversível persistido no backend; mesmo
   padrão de contrato pequeno documentado no `plan.md`, sem spec própria em
-  `motor-workflow`).
+  `motor-workflow`) e `docs/specs/011-tempo-execucao-tabela/{spec,plan,tasks}.md`
+  (ADR-012, coluna "Duração" na tabela de execuções, derivada em tempo de leitura de
+  `created_at`/`updated_at` já persistidos, sem nova instrumentação; mesmo padrão de
+  contrato pequeno documentado no `plan.md`, sem spec própria em `motor-workflow`).

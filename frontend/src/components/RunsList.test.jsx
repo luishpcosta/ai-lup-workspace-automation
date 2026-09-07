@@ -129,3 +129,29 @@ describe('RunsList — arquivamento (ADR-011-AC-13/AC-14)', () => {
     expect(screen.getByRole('button', { name: 'Desarquivar' })).toBeInTheDocument()
   })
 })
+
+describe('RunsList — tempo de execução (ADR-012-AC-06)', () => {
+  it('renders duration_seconds formatted compactly for a completed run', async () => {
+    vi.spyOn(apiClient, 'getRuns').mockResolvedValue([
+      {
+        chain_name: 'hist-005',
+        workflow_name: 'w',
+        status: 'completed',
+        updated_at: 't1',
+        duration_seconds: 134,
+      },
+    ])
+    render(<RunsList onSelect={() => {}} />)
+    expect(await screen.findByText('hist-005')).toBeInTheDocument()
+    expect(screen.getByText('2min 14s')).toBeInTheDocument()
+  })
+
+  it('renders a placeholder instead of breaking the row when duration_seconds is absent', async () => {
+    vi.spyOn(apiClient, 'getRuns').mockResolvedValue([
+      { chain_name: 'hist-005', workflow_name: 'w', status: 'completed', updated_at: 't1' },
+    ])
+    render(<RunsList onSelect={() => {}} />)
+    expect(await screen.findByText('hist-005')).toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+})

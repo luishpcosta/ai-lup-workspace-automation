@@ -3,9 +3,56 @@
 ## Current State
 
 **Last Updated:** 2026-09-07
-**Active Feature:** 010-atualizacao-arquivamento-execucoes — Atualização automática do painel/detalhe + arquivamento de execuções — Verify, `done`
+**Active Feature:** 011-tempo-execucao-tabela — Tempo de execução na tabela de execuções — Verify, `done`
 **Active SDD Phase:** Verify
-**Pending Gate:** Nenhum. Todas as 15 ACs (AC-01 a AC-15) implementadas e verificadas — ver `docs/specs/010-atualizacao-arquivamento-execucoes/tasks.md`.
+**Pending Gate:** Nenhum. Todas as 7 ACs (AC-01 a AC-07) implementadas e verificadas — ver `docs/specs/011-tempo-execucao-tabela/tasks.md`.
+
+## Sessão 2026-09-07 — ADR-012 (contexto `frontend`, `afeta: [motor-workflow]`): tempo de execução na tabela
+
+Usuário perguntou, em chat, se já seria possível trazer o "tempo de execução" de cada
+workflow para a tabela de execuções do painel, a partir do dado que já existe na base
+(sem PRD, sem skill de elicitação formal — ver ADR-012, Contexto). Duas explorações
+(backend e frontend) confirmaram que sim: `created_at`/`updated_at` por execução já
+são persistidos no `.db` SQLite por chain e já lidos por `list_runs`/`get_run_detail`
+em `http_api.py`, mas nunca subtraídos nem expostos como duração.
+
+`duration_seconds` (inteiro, segundos, ou `null`) passou a ser calculado inline em
+`http_api.py`, reaproveitando os timestamps já desempacotados — sem nova coluna, sem
+novo modelo Pydantic. Regra: status terminal usa `updated_at - created_at` (fixo);
+`running`/`pending` usa `now() - created_at` (recalculado a cada request, já que
+`updated_at` fica parado no último step concluído enquanto a execução está ativa).
+Timestamp ausente/corrompido degrada para `null` em vez de erro — mesma postura
+defensiva de `_step_plugins_by_name` (ADR-010). `RunsList.jsx` ganhou uma coluna
+"Duração" entre "Status" e "Atualizado", formatada por um novo `formatDuration()` em
+`lib/format.js` (`"45s"`/`"2min 14s"`/`"1h 03min"`) — **sem nenhum polling novo**: a
+coluna só se beneficia do `setTimeout` recursivo que `RunsList` já roda enquanto há
+execução ativa (ADR-011-AT-04).
+
+**Decisão de escopo registrada, não decidida sozinha**: duração por etapa em
+`RunDetail` ficou fora desta feature — usuário pediu especificamente "a tabela"
+(listagem); o dado (`started_at`/`finished_at` por step) já é exposto pela API hoje,
+então uma extensão futura não exige mudança de contrato adicional (ver ADR-012,
+Alternativas consideradas).
+
+`103/103 testes do frontend` (2 novos: `RunsList.test.jsx`, describe
+`RunsList — tempo de execução (ADR-012-AC-06)` — era 101 antes desta feature).
+`135/135 testes do backend` (3 novos em `test_http_api.py`: run terminado com
+timestamps fixados direto no `.db` via `UPDATE` para valor exato sem flakiness, run
+`running` mantido ativo via o padrão já existente de blocking plugin para confirmar
+não-decrescimento, timestamp corrompido para confirmar degradação graciosa — era 132
+antes). `npm run lint`/`npm run build`/`ruff check`/`ruff format` limpos.
+
+**Verificado num navegador real, não só em teste unitário**: `workflow serve` real
+(porta 8000) + `vite` dev server real (porta 5173) já em execução, reiniciados após a
+mudança. As 4 execuções reais já existentes no `watch_dir` mostraram a coluna
+"Duração" com valores batendo exatamente com `updated_at - created_at` (ex.: 415s →
+"6min 55s", 277s → "4min 37s"). Uma execução nova, real (`shell_script_runner` com
+`sleep 20`, sem mock, `duration-smoke-test`), disparada diretamente no mesmo
+`watch_dir` do backend em execução, apareceu como "Em execução" com "13s" logo após o
+disparo e — sem nenhum clique em "Atualizar" — avançou sozinha para "Concluído" com
+"20s" fixo, confirmando o cálculo `now() - created_at` durante a execução, o valor
+fixo ao terminar, e que a coluna se beneficia do polling já existente da ADR-011 sem
+nenhum mecanismo novo. `.db` de teste removido após a verificação.
 
 ## Sessão 2026-09-07 — ADR-011 (contexto `frontend`, `afeta: [motor-workflow]`): atualização automática + arquivamento
 
@@ -272,14 +319,16 @@ Nenhuma pendente e bloqueante.
 
 ## Notes for Next Session
 
-Feature 010 (ADR-011) está completa e verificada — ver a sessão mais recente no topo
-deste arquivo para detalhes (atualização automática por polling em `RunsList`/
-`RunDetail`, arquivamento reversível persistido no backend). Se uma nova demanda
-aparecer, a próxima ADR (em qualquer contexto) é `ADR-012` (numeração global, ver
-`../CONTEXT-MAP.md`). Pontos explicitamente fora de escopo em ADR-011: arquivamento
-em lote (é por execução nesta versão) e exclusão definitiva de execução (arquivar
-nunca apaga dado). Da ADR-010: suporte a qualquer plataforma agêntica além de
-`claude_code_runner` segue fora de escopo — o registro de formatadores em
-`StreamPanel.jsx` já está pronto para receber uma entrada nova sem redesenho. O
-rename pendente de `historia_id` (ADR-006, Consequências) segue em aberto, sem prazo
-definido.
+Feature 011 (ADR-012) está completa e verificada — ver a sessão mais recente no topo
+deste arquivo para detalhes (coluna "Duração" em `RunsList`, `duration_seconds`
+derivado em tempo de leitura, sem instrumentação nova). Se uma nova demanda aparecer,
+a próxima ADR (em qualquer contexto) é `ADR-013` (numeração global, ver
+`../CONTEXT-MAP.md`). Ponto explicitamente fora de escopo em ADR-012: duração por
+etapa na tela de detalhe (`RunDetail`) — o dado (`started_at`/`finished_at` por step)
+já é exposto pela API hoje, pronto para uma extensão futura sem mudança de contrato
+adicional. Pontos anteriores ainda em aberto: da ADR-011, arquivamento em lote e
+exclusão definitiva de execução seguem fora de escopo; da ADR-010, suporte a qualquer
+plataforma agêntica além de `claude_code_runner` segue fora de escopo — o registro de
+formatadores em `StreamPanel.jsx` já está pronto para receber uma entrada nova sem
+redesenho. O rename pendente de `historia_id` (ADR-006, Consequências) segue em
+aberto, sem prazo definido.

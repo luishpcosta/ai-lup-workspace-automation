@@ -277,11 +277,33 @@ def list_runs(watch_dir: Path, archived: bool = False) -> list[dict]:
                 "status": status,
                 "created_at": created_at,
                 "updated_at": updated_at,
+                "duration_seconds": _duration_seconds(status, created_at, updated_at),
                 "source_db": db_file.name,
                 "archived": bool(archived_at),
             }
         )
     return results
+
+
+def _duration_seconds(status: str, created_at: str, updated_at: str) -> int | None:
+    """Deriva a duração de uma execução dos timestamps já persistidos (ADR-012),
+    sem nenhuma nova coluna/instrumentação. Para status terminal, `updated_at` foi
+    escrito exatamente na transição final, então a diferença é fixa; para
+    `running`/`pending`, `updated_at` fica parado no último step concluído, então
+    usamos `now()` para refletir o tempo decorrido até o momento da consulta.
+    """
+    try:
+        start = datetime.fromisoformat(created_at)
+    except (TypeError, ValueError):
+        return None
+    if status in ("running", "pending"):
+        end = datetime.now(timezone.utc)
+    else:
+        try:
+            end = datetime.fromisoformat(updated_at)
+        except (TypeError, ValueError):
+            return None
+    return max(0, round((end - start).total_seconds()))
 
 
 def _step_plugins_by_name(config_path: str) -> dict[str, str]:
@@ -343,6 +365,7 @@ def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict |
         "status": status,
         "created_at": created_at,
         "updated_at": updated_at,
+        "duration_seconds": _duration_seconds(status, created_at, updated_at),
         "steps": steps,
         "archived": bool(archived_at),
     }

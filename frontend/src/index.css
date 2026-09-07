@@ -761,6 +761,14 @@ th {
   font-size: 13px;
 }
 
+.col-duration {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 .col-actions {
   text-align: right;
   white-space: nowrap;
