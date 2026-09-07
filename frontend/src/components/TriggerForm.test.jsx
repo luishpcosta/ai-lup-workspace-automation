@@ -30,7 +30,7 @@ describe('TriggerForm (ADR-007)', () => {
       .mockResolvedValue({ chain_name: 'investigar-impacto--abc123', status: 'started' })
     render(<TriggerForm />)
 
-    await userEvent.selectOptions(await screen.findByLabelText('Workflow'), 'Investigar impacto')
+    await userEvent.selectOptions(await screen.findByLabelText('Disparar Execução Workflow'), 'Investigar impacto')
     await userEvent.type(screen.getByLabelText(/O que investigar/), 'qual o impacto de X?')
     await userEvent.click(screen.getByRole('button', { name: 'Disparar' }))
 
@@ -40,7 +40,7 @@ describe('TriggerForm (ADR-007)', () => {
 
   it('the dispatch button stays disabled until a template is selected', async () => {
     render(<TriggerForm />)
-    await screen.findByLabelText('Workflow')
+    await screen.findByLabelText('Disparar Execução Workflow')
     expect(screen.getByRole('button', { name: 'Disparar' })).toBeDisabled()
   })
 
@@ -50,7 +50,7 @@ describe('TriggerForm (ADR-007)', () => {
     )
     render(<TriggerForm />)
 
-    await userEvent.selectOptions(await screen.findByLabelText('Workflow'), 'Investigar impacto')
+    await userEvent.selectOptions(await screen.findByLabelText('Disparar Execução Workflow'), 'Investigar impacto')
     await userEvent.type(screen.getByLabelText(/O que investigar/), 'x')
     await userEvent.click(screen.getByRole('button', { name: 'Disparar' }))
 
@@ -65,7 +65,7 @@ describe('TriggerForm (ADR-007)', () => {
     const onDispatched = vi.fn()
     render(<TriggerForm onDispatched={onDispatched} />)
 
-    await userEvent.selectOptions(await screen.findByLabelText('Workflow'), 'Investigar impacto')
+    await userEvent.selectOptions(await screen.findByLabelText('Disparar Execução Workflow'), 'Investigar impacto')
     await userEvent.type(screen.getByLabelText(/O que investigar/), 'x')
     await userEvent.click(screen.getByRole('button', { name: 'Disparar' }))
 
@@ -85,7 +85,7 @@ describe('TriggerForm (ADR-007)', () => {
     ])
     render(<TriggerForm />)
 
-    const select = await screen.findByLabelText('Workflow')
+    const select = await screen.findByLabelText('Disparar Execução Workflow')
     await userEvent.selectOptions(select, 'Implementar história')
 
     expect(screen.getByLabelText(/ID da história/)).toBeInTheDocument()

@@ -35,7 +35,7 @@ export default function App() {
     <main className="dashboard">
       <header className="topbar">
         <div className="topbar__identity">
-          <h1>Painel de Controle — Motor de Workflow</h1>
+          <h1>Painel de Controle — Workflow</h1>
           <p className="topbar__endpoint" title="Motor de workflow em uso">
             {config.baseUrl}
           </p>

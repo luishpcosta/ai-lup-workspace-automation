@@ -30,7 +30,7 @@ export default function TemplateSelector({ value, onSelect }) {
 
   return (
     <div className="field">
-      <label htmlFor="template">Workflow</label>
+      <label htmlFor="template">Disparar Execução Workflow</label>
       <select
         id="template"
         value={value ?? ''}
