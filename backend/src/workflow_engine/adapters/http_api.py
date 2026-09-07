@@ -41,6 +41,15 @@ unchanged: a template is a chain config file that also declares
 chain YAML under `<watch_dir>/_generated-configs/`, and calls `ServerState.trigger`
 — the exact same path `POST /runs` uses — so nothing about how a run is monitored,
 streamed, or resumed needs to know it came from a template.
+
+`archived` (ADR-011, contexto `frontend`, RF-03/RF-04) follows the same
+`.db`-is-the-source-of-truth philosophy as `plugin` (ADR-010): `archived_at` is a
+column on `workflow_runs`, added on demand by `_ensure_archived_column` (additive,
+idempotent `ALTER TABLE`), read/written direct via `sqlite3` — never through
+`StateStorePort`. `GET /runs` defaults to non-archived (today's behavior, preserved)
+and accepts `?archived=true` for the archived-only view; `GET /runs/{chain_name}`
+always reports `archived`. `POST /runs/{chain_name}/arquivar` and `.../desarquivar`
+are idempotent and 404 exactly like `.../cancelar` for an unknown `chain_name`.
 """
 
 from __future__ import annotations
@@ -53,6 +62,7 @@ import uuid
 from collections.abc import Generator, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +113,10 @@ class TrackedRun:
 
 def _error(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class ServerState:
@@ -203,17 +217,58 @@ class ServerState:
         return "already_running" if not tracked.future.done() else "not_cancellable"
 
 
-def list_runs(watch_dir: Path) -> list[dict]:
+def _ensure_archived_column(db_file: Path) -> None:
+    """Additive, idempotent migration (ADR-011-AC-01): adds `archived_at` to
+    `workflow_runs` on demand, so both `.db` files created before and after this
+    feature work with no separate migration step. `archived` is a monitoring-only
+    concept (like `plugin` per step, ADR-010) — read/written direct via `sqlite3`,
+    never through `StateStorePort` (keeps the ADR-004 decoupling: monitoring must see
+    executions regardless of who/what created the `.db` file).
+    """
+    conn = sqlite3.connect(db_file)
+    try:
+        try:
+            conn.execute("ALTER TABLE workflow_runs ADD COLUMN archived_at TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists — degrade gracefully, never fail the caller
+    finally:
+        conn.close()
+
+
+def set_run_archived(watch_dir: Path, chain_name: str, archived: bool) -> bool:
+    """Returns False if chain_name has no `.db` file (ADR-011-AC-04)."""
+    db_file = watch_dir / f"{chain_name}.db"
+    if not db_file.exists():
+        return False
+    _ensure_archived_column(db_file)
+    conn = sqlite3.connect(db_file)
+    try:
+        conn.execute(
+            "UPDATE workflow_runs SET archived_at = ? "
+            "WHERE run_id = (SELECT run_id FROM workflow_runs ORDER BY created_at DESC LIMIT 1)",
+            (_now() if archived else None,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return True
+
+
+def list_runs(watch_dir: Path, archived: bool = False) -> list[dict]:
     results = []
     for db_file in sorted(watch_dir.glob("*.db")):
+        _ensure_archived_column(db_file)
         row = _query_one(
             db_file,
-            "SELECT run_id, workflow_name, status, created_at, updated_at "
+            "SELECT run_id, workflow_name, status, created_at, updated_at, archived_at "
             "FROM workflow_runs ORDER BY created_at DESC LIMIT 1",
         )
         if row is None:
             continue
-        run_id, workflow_name, status, created_at, updated_at = row
+        run_id, workflow_name, status, created_at, updated_at, archived_at = row
+        if bool(archived_at) != archived:
+            continue
         results.append(
             {
                 "chain_name": db_file.stem,
@@ -223,23 +278,40 @@ def list_runs(watch_dir: Path) -> list[dict]:
                 "created_at": created_at,
                 "updated_at": updated_at,
                 "source_db": db_file.name,
+                "archived": bool(archived_at),
             }
         )
     return results
+
+
+def _step_plugins_by_name(config_path: str) -> dict[str, str]:
+    """Maps step_name -> plugin from the chain's own YAML config, reloaded fresh
+    (ADR-010, AT-05) — same technique already used by `_resolve_active_claude_step`
+    (ADR-005) to decide whether a step is streamable. Returns {} (never raises) if
+    the config can't be reloaded, so a missing/invalid file degrades to `plugin:
+    null` per step instead of failing the whole run-detail response.
+    """
+    try:
+        chain = YamlJsonChainLoader().load(config_path)
+    except ChainValidationError:
+        return {}
+    return {step.name: step.plugin for step in chain.steps}
 
 
 def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict | None:
     db_file = watch_dir / f"{chain_name}.db"
     if not db_file.exists():
         return None
+    _ensure_archived_column(db_file)
     run_row = _query_one(
         db_file,
-        "SELECT run_id, status, created_at, updated_at "
+        "SELECT run_id, status, created_at, updated_at, config_path, archived_at "
         "FROM workflow_runs ORDER BY created_at DESC LIMIT 1",
     )
     if run_row is None:
         return None
-    run_id, status, created_at, updated_at = run_row
+    run_id, status, created_at, updated_at, config_path, archived_at = run_row
+    plugins_by_step = _step_plugins_by_name(config_path)
 
     columns = "step_name, status, attempt_count, started_at, finished_at, error_message"
     if include_io:
@@ -258,6 +330,7 @@ def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict |
             "started_at": r[3],
             "finished_at": r[4],
             "error_message": r[5],
+            "plugin": plugins_by_step.get(r[0]),
         }
         if include_io:
             step["input"] = json.loads(r[6]) if r[6] else None
@@ -271,6 +344,7 @@ def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict |
         "created_at": created_at,
         "updated_at": updated_at,
         "steps": steps,
+        "archived": bool(archived_at),
     }
 
 
@@ -482,8 +556,10 @@ def build_app(
         return {"chain_name": chain_name, "status": "started"}
 
     @app.get("/runs")
-    def get_runs() -> list[dict]:
-        return list_runs(state.watch_dir)
+    def get_runs(archived: str | None = None) -> list[dict]:
+        # ADR-011-AC-06: sem o parâmetro (ou qualquer valor != "true"), retorna só
+        # não-arquivadas — comportamento de hoje, preservado.
+        return list_runs(state.watch_dir, archived=(archived == "true"))
 
     @app.get("/runs/{chain_name}")
     def get_run(chain_name: str, include: str | None = Query(default=None)) -> dict:
@@ -559,6 +635,22 @@ def build_app(
                 ),
             )
         raise HTTPException(404, detail=_error("not_found", f"unknown chain_name: {chain_name}"))
+
+    @app.post("/runs/{chain_name}/arquivar")
+    def archive_run(chain_name: str) -> dict:
+        if not set_run_archived(state.watch_dir, chain_name, archived=True):
+            raise HTTPException(
+                404, detail=_error("not_found", f"unknown chain_name: {chain_name}")
+            )
+        return {"chain_name": chain_name, "archived": True}
+
+    @app.post("/runs/{chain_name}/desarquivar")
+    def unarchive_run(chain_name: str) -> dict:
+        if not set_run_archived(state.watch_dir, chain_name, archived=False):
+            raise HTTPException(
+                404, detail=_error("not_found", f"unknown chain_name: {chain_name}")
+            )
+        return {"chain_name": chain_name, "archived": False}
 
     return app
 

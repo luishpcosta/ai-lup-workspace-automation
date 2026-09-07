@@ -30,7 +30,7 @@ params_schema:
     type: textarea
     required: true
   - name: docs_referenced
-    label: "Specs de referência"
+    label: "Knowledge Bases"
     type: multiselect
     required: false
     source: spec_multiselect

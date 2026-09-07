@@ -170,6 +170,17 @@ p {
   flex-shrink: 0;
 }
 
+/* Separa o alternador de tema do grupo de botões de ação (ADR-010-AC-01): uma
+   preferência de exibição, não mais uma ação da lista — por isso fica depois de um
+   divisor, à direita de todos os botões, nunca intercalado entre eles. */
+.topbar__divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
 .dashboard__grid {
   display: grid;
   grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr);
@@ -436,27 +447,143 @@ tr:focus-visible {
   padding: 7px 10px;
 }
 
-/* Lista de checkboxes (SpecPicker) — cabe numa caixa com rolagem própria em vez
-   de esticar o formulário indefinidamente conforme o repositório de specs cresce. */
-ul[aria-label='Specs de referência'] {
-  max-height: 180px;
-  overflow-y: auto;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
-  gap: 2px;
-}
-
-ul[aria-label='Specs de referência'] label {
+/* Knowledge Bases (SpecPicker, ADR-010) — combobox de multi-seleção em barra
+   (react-select, `unstyled`), estilizado inteiramente com os tokens do projeto via
+   classNamePrefix="select", em vez do tema padrão da lib. */
+.select__control {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 400;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 38px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  cursor: text;
+}
+
+.select__control--is-focused {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.select__value-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  padding: 0;
+}
+
+.select__placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.select__input-container {
   color: var(--text);
   font-size: 13px;
+  margin: 0;
+  padding: 0;
+}
+
+.select__multi-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.select__multi-value__label {
+  padding: 0;
+}
+
+.select__multi-value__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--text-muted);
   cursor: pointer;
-  padding: 3px 0;
+}
+
+.select__multi-value__remove:hover {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.select__indicators {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-muted);
+}
+
+.select__dropdown-indicator,
+.select__clear-indicator {
+  display: inline-flex;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.select__dropdown-indicator:hover,
+.select__clear-indicator:hover {
+  color: var(--text);
+}
+
+.select__indicator-separator {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 2px 2px;
+}
+
+.select__menu {
+  margin-top: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  z-index: 5;
+}
+
+.select__menu-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.select__option {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.select__option--is-focused {
+  background: var(--row-hover);
+}
+
+.select__option--is-selected {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.select__no-options-message {
+  padding: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 input[type='checkbox'] {
@@ -634,6 +761,11 @@ th {
   font-size: 13px;
 }
 
+.col-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
 .run-name {
   display: block;
   font-weight: 500;
@@ -800,6 +932,12 @@ ul {
   min-width: 0;
 }
 
+.detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .detail__identity h2 {
   font-size: 18px;
   overflow-wrap: anywhere;
@@ -828,6 +966,129 @@ tr[data-status='failed'] .col-error {
 
 .stream .section-head {
   margin-bottom: 12px;
+}
+
+.stream .section-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stream__platform-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.stream__head-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ---------- Leitura formatada do stream (ADR-010) ---------- */
+
+.stream-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.stream-turn {
+  margin: 0;
+  font-size: 13px;
+}
+
+.stream-turn--text {
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.stream-turn--summary {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.stream-turn--ok {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.stream-turn--failed {
+  background: var(--warn-soft);
+  color: var(--warn-strong);
+}
+
+.stream-turn--raw {
+  font-family: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.stream-tool {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.stream-tool__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.stream-tool__summary::-webkit-details-marker {
+  display: none;
+}
+
+.stream-tool__name {
+  font-weight: 600;
+  font-family: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+}
+
+.stream-tool__status {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.stream-tool[data-status='failed'] .stream-tool__status {
+  color: var(--warn-strong);
+}
+
+.stream-tool__detail {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stream-tool__detail h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.stream-tool__detail pre {
+  max-height: 200px;
 }
 
 pre {

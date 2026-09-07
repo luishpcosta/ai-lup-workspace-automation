@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getRuns } from '../lib/apiClient'
+import { archiveRun, getRuns, unarchiveRun } from '../lib/apiClient'
 import { describeStatus, formatAbsoluteTime, formatRelativeTime } from '../lib/format'
 
 // ADR-006-AT-02 / AC-04 (listagem), AC-12 (destaque visual passivo de falha).
@@ -13,26 +13,64 @@ const FILTERS = [
   { id: 'all', label: 'Total', tone: 'neutral' },
 ]
 
+// ADR-011-AC-08/AC-09: enquanto há execução não-terminal na resposta mais recente,
+// reconsulta GET /runs sozinho, sem exigir clique em "Atualizar" — para assim que
+// não há mais nada ativo, para não gerar requisição periódica sem propósito.
+const POLL_INTERVAL_MS = 3000
+const ACTIVE_STATUSES = new Set(['running', 'pending'])
+
 export default function RunsList({ onSelect, refreshToken }) {
   const [runs, setRuns] = useState(null)
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
+  // ADR-011-AC-13/AC-14: "Arquivadas" é um modo à parte dos filtros de status —
+  // troca a própria consulta (GET /runs?archived=true), não filtra em memória.
+  const [showArchived, setShowArchived] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    getRuns()
-      .then((data) => {
-        if (cancelled) return
-        setRuns(data)
-        setError(null)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err)
-      })
+    let timeoutId = null
+
+    // Auto-agendado (setTimeout recursivo, não setInterval fixo): cada rodada só
+    // agenda a próxima se a resposta que acabou de chegar tiver algo ativo — decide
+    // com o dado fresco, não com o estado (que só atualiza depois do fetch resolver,
+    // então checar `runs` aqui dentro sempre veria o valor da rodada anterior).
+    function load() {
+      getRuns({ archived: showArchived })
+        .then((data) => {
+          if (cancelled) return
+          setRuns(data)
+          setError(null)
+          const hasActive = data.some((run) => ACTIVE_STATUSES.has(run.status))
+          if (!showArchived && hasActive) {
+            timeoutId = setTimeout(load, POLL_INTERVAL_MS)
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err)
+        })
+    }
+
+    load()
+
     return () => {
       cancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [refreshToken])
+  }, [refreshToken, showArchived])
+
+  async function handleArchiveToggle(chainName) {
+    try {
+      if (showArchived) {
+        await unarchiveRun(chainName)
+      } else {
+        await archiveRun(chainName)
+      }
+      setRuns((prev) => (prev ?? []).filter((run) => run.chain_name !== chainName))
+    } catch (err) {
+      setError(err)
+    }
+  }
 
   const counts = useMemo(() => {
     const source = runs ?? []
@@ -46,8 +84,9 @@ export default function RunsList({ onSelect, refreshToken }) {
 
   const visible = useMemo(() => {
     if (!runs) return []
+    if (showArchived) return runs
     return filter === 'all' ? runs : runs.filter((run) => run.status === filter)
-  }, [runs, filter])
+  }, [runs, filter, showArchived])
 
   return (
     <section className="runs" aria-label="Execuções">
@@ -57,22 +96,41 @@ export default function RunsList({ onSelect, refreshToken }) {
             key={entry.id}
             type="button"
             className={`summary-card summary-card--${entry.tone}`}
-            aria-pressed={filter === entry.id}
+            aria-pressed={!showArchived && filter === entry.id}
             data-zero={!runs || counts[entry.id] === 0}
-            disabled={!runs}
+            disabled={!runs || showArchived}
             onClick={() => setFilter(filter === entry.id ? 'all' : entry.id)}
           >
-            <span className="summary-card__value">{runs ? counts[entry.id] : '—'}</span>
+            <span className="summary-card__value">{runs && !showArchived ? counts[entry.id] : '—'}</span>
             <span className="summary-card__label">{entry.label}</span>
           </button>
         ))}
+        {/* ADR-011-AC-14: aba dedicada — troca a própria consulta (GET
+            /runs?archived=true), não é mais um filtro em memória sobre a mesma lista. */}
+        <button
+          type="button"
+          className="summary-card summary-card--neutral"
+          aria-pressed={showArchived}
+          onClick={() => {
+            setShowArchived((prev) => !prev)
+            setFilter('all')
+          }}
+        >
+          <span className="summary-card__value">🗄</span>
+          <span className="summary-card__label">Arquivadas</span>
+        </button>
       </div>
 
       <div className="section-head">
-        <h2>Execuções</h2>
-        {filter !== 'all' && (
+        <h2>{showArchived ? 'Execuções arquivadas' : 'Execuções'}</h2>
+        {!showArchived && filter !== 'all' && (
           <button type="button" className="btn-link" onClick={() => setFilter('all')}>
             Limpar filtro
+          </button>
+        )}
+        {showArchived && (
+          <button type="button" className="btn-link" onClick={() => setShowArchived(false)}>
+            Voltar à listagem
           </button>
         )}
       </div>
@@ -96,7 +154,9 @@ export default function RunsList({ onSelect, refreshToken }) {
       )}
 
       {!error && runs !== null && runs.length === 0 && (
-        <p className="state-block state-block--empty">Nenhuma execução registrada ainda.</p>
+        <p className="state-block state-block--empty">
+          {showArchived ? 'Nenhuma execução arquivada.' : 'Nenhuma execução registrada ainda.'}
+        </p>
       )}
 
       {!error && runs !== null && runs.length > 0 && visible.length === 0 && (
@@ -112,6 +172,9 @@ export default function RunsList({ onSelect, refreshToken }) {
                 <th scope="col">Status</th>
                 <th scope="col" className="col-time">
                   Atualizado
+                </th>
+                <th scope="col" className="col-actions">
+                  <span className="visually-hidden">Ações</span>
                 </th>
               </tr>
             </thead>
@@ -146,6 +209,18 @@ export default function RunsList({ onSelect, refreshToken }) {
                     </td>
                     <td className="col-time" title={formatAbsoluteTime(run.updated_at)}>
                       {formatRelativeTime(run.updated_at)}
+                    </td>
+                    <td className="col-actions">
+                      <button
+                        type="button"
+                        className="btn-link"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleArchiveToggle(run.chain_name)
+                        }}
+                      >
+                        {showArchived ? 'Desarquivar' : 'Arquivar'}
+                      </button>
                     </td>
                   </tr>
                 )

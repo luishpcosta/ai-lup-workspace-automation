@@ -56,8 +56,10 @@ async function request(path, options = {}) {
   return response.json()
 }
 
-export function getRuns() {
-  return request('/runs')
+// ADR-011-AC-06: sem `archived`, retorna só não-arquivadas (comportamento de
+// sempre); `archived: true` troca para a listagem de arquivadas.
+export function getRuns({ archived } = {}) {
+  return request(archived ? '/runs?archived=true' : '/runs')
 }
 
 export function getRunDetail(chainName) {
@@ -97,6 +99,16 @@ export function postInstruction(chainName, mensagem) {
 
 export function cancelRun(chainName) {
   return request(`/runs/${encodeURIComponent(chainName)}/cancelar`, { method: 'POST' })
+}
+
+// ADR-011-AC-02/AC-03: idempotentes — arquivar/desarquivar de novo mantém o mesmo
+// resultado.
+export function archiveRun(chainName) {
+  return request(`/runs/${encodeURIComponent(chainName)}/arquivar`, { method: 'POST' })
+}
+
+export function unarchiveRun(chainName) {
+  return request(`/runs/${encodeURIComponent(chainName)}/desarquivar`, { method: 'POST' })
 }
 
 // Stream ao vivo (ADR-005/RF-04): usa fetch + ReadableStream, não EventSource, porque

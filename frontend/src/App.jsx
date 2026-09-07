@@ -50,10 +50,12 @@ export default function App() {
               Atualizar
             </button>
           )}
-          <ThemeToggle />
           <button type="button" className="btn-secondary" onClick={() => setReconfiguring(true)}>
             Configurações
           </button>
+          {/* ADR-010-AC-01: separado do grupo de botões por um divisor, não intercalado entre eles. */}
+          <span className="topbar__divider" aria-hidden="true" />
+          <ThemeToggle />
         </div>
       </header>
 
