@@ -47,3 +47,19 @@ Caminho determinístico (`<workspace_path>/.workflow-logs/<run_id>/<step_name>.l
 do transcript de uma sessão do Claude Code Runner — existe mesmo quando a etapa falha,
 e (a partir da ADR-005) é escrito incrementalmente, tornando-se "tailable" em tempo real.
 _Evitar_: session transcript, output file.
+
+**pergunta pendente** (`ask_user`, ADR-013):
+Tool MCP dedicada (`mcp_servers/ask_user_server.py`) que o modo
+`coding_local_interativo` do Claude Code Runner disponibiliza ao agente — chamá-la
+bloqueia de verdade o agente (protocolo de tool-use, não convenção de prompt) até
+uma resposta chegar por `POST /runs/{chain_name}/resposta` ou o timeout estourar.
+Sinalizada pela existência de `<step_name>.pergunta.json` (par de
+`<step_name>.resposta.json`), mesma convenção determinística de `session_log_path`/
+`instructions_path`. _Evitar_: confirmação (termo já usado por `confirm_pr`,
+ADR-008, que é polling/retry, não pausa real).
+
+**awaiting_input** (ADR-013):
+Campo aditivo de `GET /runs`/`GET /runs/{chain_name}` — `true` só quando a run está
+`running` **e** existe uma pergunta pendente (`ask_user`) para a etapa ativa; derivado
+em tempo de leitura, sem coluna nova no State Store, mesma filosofia de `plugin`
+(ADR-010)/`archived`/`duration_seconds` (ADR-011/012).

@@ -28,7 +28,12 @@ controle web, implementado desde a ADR-006 — ver Planejamento).
   `RunDetail` para arquivamento e atualização automática; ADR-012 acrescenta o campo
   `duration_seconds` a `GET /runs`/`GET /runs/{chain_name}` (aditivo, retrocompatível,
   derivado em tempo de leitura de `created_at`/`updated_at` já existentes, sem coluna
-  nova), consumido pelo `RunsList` para a coluna "Duração".
+  nova), consumido pelo `RunsList` para a coluna "Duração"; ADR-013 acrescenta a rota
+  `POST /runs/{chain_name}/resposta` e o campo `awaiting_input` a
+  `GET /runs`/`GET /runs/{chain_name}` (aditivo, retrocompatível, derivado em tempo de
+  leitura da existência de um arquivo `.pergunta.json`, sem coluna nova), consumidos
+  pelo `InstructionBox` (formulário de resposta a uma pergunta do agente) e pelo
+  `RunsList` (destaque de execuções aguardando resposta).
 
 ## Decisões (ADR)
 
@@ -37,14 +42,14 @@ sequencial entre eles** (não reinicia por contexto) — antes de criar uma ADR 
 em qualquer contexto, confira o maior número já usado nos dois diretórios abaixo.
 
 - [Registro de decisões — motor-workflow](./backend/adr/) — ADR-001 a ADR-005,
-  ADR-007 e ADR-008, todas em `contextos: [motor-workflow]` (ADR-007 também
-  `contextos: [..., frontend]`, `afeta: [frontend]`).
+  ADR-007, ADR-008 e ADR-013, todas em `contextos: [motor-workflow]` (ADR-007 e
+  ADR-013 também `contextos: [..., frontend]`, `afeta: [frontend]`).
 - [Registro de decisões — frontend](./frontend/adr/) — ADR-006, ADR-009, ADR-010,
   ADR-011 e ADR-012, todas `contextos: [frontend]`, `afeta: [motor-workflow]` (ADR-009
   `depende_de: [ADR-006, ADR-007]`; ADR-010 `depende_de: [ADR-005, ADR-006,
   ADR-007]`; ADR-011 `depende_de: [ADR-006, ADR-007, ADR-010]`; ADR-012
-  `depende_de: [ADR-006, ADR-011]`) — próxima ADR nova, em qualquer contexto, é
-  ADR-013.
+  `depende_de: [ADR-006, ADR-011]`; ADR-013 `depende_de: [ADR-002, ADR-005, ADR-006,
+  ADR-008, ADR-010, ADR-011]`) — próxima ADR nova, em qualquer contexto, é ADR-014.
 
 Ver `<contexto>/adr/ADR-00N-*.md` para o front matter de relação
 (`depende_de`/`afeta`/`supera`) de cada uma.

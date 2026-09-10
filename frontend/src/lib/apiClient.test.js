@@ -10,6 +10,7 @@ import {
   getRuns,
   getWorkflows,
   openStream,
+  postAnswer,
   postInstruction,
   unarchiveRun,
 } from './apiClient'
@@ -221,6 +222,29 @@ describe('apiClient — instrucoes/cancelar', () => {
   it('reflects the cancelled outcome', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { status: 'cancelled' })))
     await expect(cancelRun('hist-005')).resolves.toEqual({ status: 'cancelled' })
+  })
+})
+
+describe('apiClient — resposta (ask_user, coding_local_interativo)', () => {
+  it('posts a resposta to /resposta, a channel separate from /instrucoes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(202, { status: 'accepted' }))
+    vi.stubGlobal('fetch', fetchMock)
+    await postAnswer('hist-005', 'use a branch feature/x')
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8000/runs/hist-005/resposta')
+    expect(JSON.parse(options.body)).toEqual({ resposta: 'use a branch feature/x' })
+  })
+
+  it('maps 409 not_interactable to a typed error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(409, { error: { code: 'not_interactable', message: 'no active step' } }),
+      ),
+    )
+    await expect(postAnswer('hist-005', 'x')).rejects.toMatchObject({
+      code: 'not_interactable',
+    })
   })
 })
 

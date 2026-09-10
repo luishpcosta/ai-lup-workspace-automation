@@ -1,0 +1,65 @@
+# Template de workflow: "Implementar (repositório local, PR pela CI do próprio
+# repo, interativo)" — mesma cadeia de `claude-implementar-local.yaml` (ADR-008:
+# repo local já existente, `git_pr`/`confirm_pr` verifica a PR aberta pela CI do
+# repositório-alvo), trocando só o modo do step `implementar` de `coding_local`
+# para `coding_local_interativo`: o agente ganha a tool MCP `ask_user`
+# (`mcp_servers/ask_user_server.py`) e pode pausar de verdade — esperando uma
+# resposta real vinda do painel — sempre que precisar de uma decisão que não
+# pode inferir sozinho. `claude-implementar-local.yaml` continua existindo,
+# sem nenhuma mudança, para quem quiser o fluxo só-streaming de hoje.
+#
+# Este arquivo é, ao mesmo tempo, (a) um chain config válido — `name`/`steps`
+# são carregados sem modificação por YamlJsonChainLoader — e (b) um descritor
+# de template: `id`/`label`/`description`/`params_schema` são lidos só por
+# FileSystemWorkflowTemplateRegistry e ignorados pelo chain loader. `vars:` não
+# é declarado aqui — é preenchido em runtime a partir dos `params` submetidos
+# (ver application/workflow_templates.py::materialize_chain_raw).
+
+id: claude-implementar-local-interativo
+label: "Implementar com Claude Code (interativo)"
+description: >-
+  Igual a "Implementar com Claude Code", mas o agente pode pausar e perguntar
+  algo pelo painel sempre que precisar de uma decisão ou esclarecimento antes
+  de continuar — a execução espera de verdade por uma resposta em tempo real,
+  não é só streaming. Roda contra um repositório local já existente, segue o
+  fluxo de Git documentado nesse repositório, e não abre PR pelo motor: quem
+  abre é a CI do próprio repositório-alvo. O motor só confirma que a PR abriu.
+params_schema:
+  - name: repo_path
+    label: "Repositório local"
+    type: select
+    required: true
+    source: local_repos
+  - name: prompt
+    label: "O que implementar"
+    type: textarea
+    required: true
+  - name: docs_referenced
+    label: "Knowledge Bases"
+    type: multiselect
+    required: false
+    source: spec_multiselect
+
+name: claude-implementar-local-interativo
+steps:
+  - name: implementar
+    plugin: claude_code_runner
+    usa_output_anterior: false
+    params:
+      modo: "coding_local_interativo"
+      mcp_config_path: "./config/mcp-docs-proxy.json"
+      workspace_path: "{{ vars.repo_path }}"
+      prompt: "{{ vars.prompt }}"
+      docs_referenced: "{{ vars.docs_referenced }}"
+    retry:
+      max_attempts: 1
+
+  - name: confirmar_pr
+    plugin: git_pr
+    usa_output_anterior: true
+    params:
+      action: "confirm_pr"
+    retry:
+      max_attempts: 5
+      initial_delay: 30.0
+      multiplier: 1.5

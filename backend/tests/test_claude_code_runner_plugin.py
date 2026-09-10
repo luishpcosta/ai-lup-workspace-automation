@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -527,6 +528,274 @@ def test_coding_local_mode_without_workspace_path_raises_ac02(tmp_path):
     with pytest.raises(ValueError, match="workspace_path"):
         plugin.run(context)
     assert factory.calls == []
+
+
+def test_coding_local_interativo_mode_builds_merged_mcp_config_with_ask_user(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    static_mcp_config = tmp_path / "mcp-docs-proxy.json"
+    static_mcp_config.write_text(
+        json.dumps({"mcpServers": {"docs-mcp-proxy": {"command": "docker", "args": ["run"]}}}),
+        encoding="utf-8",
+    )
+    lines = [
+        result_line({"summary": "implementado", "docs_referenced": [], "branch": "feature/x"}),
+    ]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local_interativo",
+            "mcp_config_path": str(static_mcp_config),
+            "prompt": "implemente algo ambíguo",
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="implementar",
+    )
+
+    output = plugin.run(context)
+
+    assert output["status"] == "success"
+    assert output["branch"] == "feature/x"
+
+    cmd = factory.calls[0]
+    merged_path = Path(cmd[cmd.index("--mcp-config") + 1])
+    # deterministic, sibling of session_log_path/instructions_path
+    assert merged_path == workdir / ".workflow-logs" / "run-1" / "implementar.mcp-config.json"
+    assert merged_path.exists()
+    merged = json.loads(merged_path.read_text(encoding="utf-8"))
+    # the motor-supplied static server (docs proxy) survives the merge
+    assert merged["mcpServers"]["docs-mcp-proxy"]["command"] == "docker"
+    ask_user_entry = merged["mcpServers"]["ask-user"]
+    assert ask_user_entry["command"]  # sys.executable, resolved at build time
+    assert ask_user_entry["args"][0].endswith("ask_user_server.py")
+    assert Path(ask_user_entry["args"][0]).is_absolute()
+    assert ask_user_entry["env"] == {
+        "WORKSPACE_PATH": str(workdir),
+        "RUN_ID": "run-1",
+        "STEP_NAME": "implementar",
+    }
+
+    # prompt tells the agent about the ask_user tool
+    first_message = json.loads(factory.procs[0].stdin.lines[0])
+    assert "ask_user" in first_message["message"]["content"]
+
+
+def test_coding_local_interativo_mode_without_static_mcp_config_file_still_gets_ask_user(
+    tmp_path,
+):
+    """The merge tolerates a mcp_config_path that doesn't exist on disk (e.g. a
+    template that only wants the ask_user tool, no docs proxy) — starts from an
+    empty mcpServers dict instead of failing.
+    """
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    lines = [result_line({"summary": "ok", "docs_referenced": [], "branch": "feature/x"})]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local_interativo",
+            "mcp_config_path": str(tmp_path / "does-not-exist.json"),
+            "prompt": "implemente",
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="implementar",
+    )
+
+    plugin.run(context)
+
+    cmd = factory.calls[0]
+    merged_path = Path(cmd[cmd.index("--mcp-config") + 1])
+    merged = json.loads(merged_path.read_text(encoding="utf-8"))
+    assert set(merged["mcpServers"]) == {"ask-user"}
+
+
+def test_coding_local_interativo_mode_rejects_non_object_static_mcp_config(tmp_path):
+    """Regression (code review, ADR-013): a static mcp_config_path that parses to
+    valid JSON but isn't an object (e.g. a list) must raise a clear ValueError,
+    not an AttributeError from `merged.setdefault` three frames deep.
+    """
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    static_mcp_config = tmp_path / "mcp-docs-proxy.json"
+    static_mcp_config.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
+
+    factory = FakePopenFactory(
+        [result_line({"summary": "ok", "docs_referenced": [], "branch": "f"})]
+    )
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local_interativo",
+            "mcp_config_path": str(static_mcp_config),
+            "prompt": "implemente",
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="implementar",
+    )
+
+    with pytest.raises(ValueError, match="mcpServers"):
+        plugin.run(context)
+    assert factory.calls == []
+
+
+def test_coding_local_interativo_mode_rejects_malformed_json_static_mcp_config(tmp_path):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    static_mcp_config = tmp_path / "mcp-docs-proxy.json"
+    static_mcp_config.write_text("{not valid json", encoding="utf-8")
+
+    factory = FakePopenFactory(
+        [result_line({"summary": "ok", "docs_referenced": [], "branch": "f"})]
+    )
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local_interativo",
+            "mcp_config_path": str(static_mcp_config),
+            "prompt": "implemente",
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        step_name="implementar",
+    )
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        plugin.run(context)
+    assert factory.calls == []
+
+
+def test_coding_local_interativo_mode_without_workspace_path_raises(tmp_path):
+    factory = FakePopenFactory(
+        [result_line({"summary": "ok", "docs_referenced": [], "branch": "feature/x"})]
+    )
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(popen_factory=factory)
+
+    context = make_context(
+        params={
+            "modo": "coding_local_interativo",
+            "mcp_config_path": "./config/mcp-docs-proxy.json",
+            "prompt": "implemente",
+        },
+        input_data=None,
+        step_name="implementar",
+    )
+
+    with pytest.raises(ValueError, match="workspace_path"):
+        plugin.run(context)
+    assert factory.calls == []
+
+
+def test_coding_local_interativo_holds_instruction_while_ask_user_pending_then_forwards_it(
+    tmp_path,
+):
+    """Regression (code review, ADR-013): injecting a stdin message while an
+    `ask_user` tool call has no `tool_result` yet is unverified CLI behavior —
+    `_poll_instructions` must hold a pending instruction (not forward it, not
+    lose it) for as long as `<step>.pergunta.json` exists, and only forward it
+    once the question resolves (the file is gone).
+    """
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    run_id, step_name = "run-1", "implementar"
+
+    pergunta_path = workdir / ".workflow-logs" / run_id / f"{step_name}.pergunta.json"
+    pergunta_path.parent.mkdir(parents=True, exist_ok=True)
+    pergunta_path.write_text('{"question": "Qual branch?", "options": []}', encoding="utf-8")
+
+    instructions_path = workdir / ".workflow-logs" / run_id / f"{step_name}.instrucoes.jsonl"
+    instructions_path.write_text("responda X\n", encoding="utf-8")
+
+    # Several filler lines (each with DelayedLines' default 0.03s gap) give the
+    # poller thread and the thread below real wall-clock time to interleave.
+    lines = [
+        system_line(),
+        system_line(),
+        system_line(),
+        system_line(),
+        system_line(),
+        system_line(),
+        result_line({"summary": "ok", "docs_referenced": [], "branch": "feature/x"}),
+    ]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(
+        popen_factory=factory, instruction_poll_interval=0.02
+    )
+
+    def resolve_question_shortly():
+        time.sleep(0.08)
+        pergunta_path.unlink()
+
+    thread = threading.Thread(target=resolve_question_shortly)
+    thread.start()
+
+    context = make_context(
+        params={
+            "modo": "coding_local_interativo",
+            "mcp_config_path": str(tmp_path / "does-not-exist.json"),
+            "prompt": "implemente",
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        run_id=run_id,
+        step_name=step_name,
+    )
+
+    plugin.run(context)
+    thread.join(timeout=5)
+
+    sent = [json.loads(m) for m in factory.procs[0].stdin.lines]
+    contents = [m["message"]["content"] for m in sent]
+    assert any("responda X" in c for c in contents), (
+        "held instruction should be forwarded once the question resolves"
+    )
+
+
+def test_coding_local_interativo_never_forwards_instruction_while_ask_user_stays_pending(
+    tmp_path,
+):
+    workdir = tmp_path / "ws"
+    workdir.mkdir()
+    run_id, step_name = "run-1", "implementar"
+
+    pergunta_path = workdir / ".workflow-logs" / run_id / f"{step_name}.pergunta.json"
+    pergunta_path.parent.mkdir(parents=True, exist_ok=True)
+    pergunta_path.write_text('{"question": "Qual branch?", "options": []}', encoding="utf-8")
+
+    instructions_path = workdir / ".workflow-logs" / run_id / f"{step_name}.instrucoes.jsonl"
+    instructions_path.write_text("responda X\n", encoding="utf-8")
+
+    lines = [system_line(), result_line({"summary": "ok", "docs_referenced": [], "branch": "f"})]
+    factory = FakePopenFactory(lines)
+    plugin = claude_code_runner.ClaudeCodeRunnerPlugin(
+        popen_factory=factory, instruction_poll_interval=0.005
+    )
+
+    context = make_context(
+        params={
+            "modo": "coding_local_interativo",
+            "mcp_config_path": str(tmp_path / "does-not-exist.json"),
+            "prompt": "implemente",
+            "workspace_path": str(workdir),
+        },
+        input_data=None,
+        run_id=run_id,
+        step_name=step_name,
+    )
+
+    plugin.run(context)  # pergunta_path never removed during this short session
+
+    sent = [json.loads(m) for m in factory.procs[0].stdin.lines]
+    contents = [m["message"]["content"] for m in sent]
+    assert not any("responda X" in c for c in contents)
 
 
 def test_forwards_pending_instruction_to_stdin_ac04(tmp_path):

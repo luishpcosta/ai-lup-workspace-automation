@@ -21,6 +21,9 @@ const CANCEL_OUTCOME_MESSAGES = {
 
 // ADR-006-AT-02 / AC-05 (detalhe por etapa), AT-05 / AC-10 (cancelar). Hospeda
 // StreamPanel/InstructionBox (AT-04) — eles cuidam sozinhos do caso "sem etapa ativa".
+// `pendingQuestion` é fiação pura entre os dois: StreamPanel deriva do stream se há
+// uma chamada `ask_user` (modo coding_local_interativo) pendente e devolve via
+// `onPendingQuestion`; InstructionBox vira formulário de resposta enquanto existir.
 // ADR-010-AC-05: repassa a StreamPanel o `plugin` do step em execução (novo campo
 // aditivo de GET /runs/{chain_name}), para que ela escolha a leitura formatada certa.
 // ADR-011-AC-10/AC-12: reconsulta GET /runs/{chain_name} sozinho enquanto o status
@@ -31,6 +34,7 @@ export default function RunDetail({ chainName, onBack }) {
   const [streamRefreshToken, setStreamRefreshToken] = useState(0)
   const [cancelMessage, setCancelMessage] = useState(null)
   const [archiveError, setArchiveError] = useState(null)
+  const [pendingQuestion, setPendingQuestion] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -176,8 +180,9 @@ export default function RunDetail({ chainName, onBack }) {
             chainName={chainName}
             plugin={detail.steps.find((step) => step.status === 'running')?.plugin}
             onRefresh={() => setStreamRefreshToken((token) => token + 1)}
+            onPendingQuestion={setPendingQuestion}
           />
-          <InstructionBox chainName={chainName} />
+          <InstructionBox chainName={chainName} pendingQuestion={pendingQuestion} />
         </>
       )}
     </section>

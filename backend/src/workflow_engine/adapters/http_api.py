@@ -105,6 +105,10 @@ class InstructionRequest(BaseModel):
     mensagem: str
 
 
+class AnswerRequest(BaseModel):
+    resposta: str
+
+
 @dataclass
 class TrackedRun:
     future: Future
@@ -280,6 +284,13 @@ def list_runs(watch_dir: Path, archived: bool = False) -> list[dict]:
                 "duration_seconds": _duration_seconds(status, created_at, updated_at),
                 "source_db": db_file.name,
                 "archived": bool(archived_at),
+                # ADR-013: only ever true for a running chain — skips the
+                # YAML-reload cost entirely for every terminal row (the common
+                # case in a list), same "cheap for the rest, real I/O only for
+                # what's actually live" trade-off already accepted for
+                # /stream and /instrucoes.
+                "awaiting_input": status == "running"
+                and _is_awaiting_input(watch_dir, db_file.stem),
             }
         )
     return results
@@ -306,20 +317,6 @@ def _duration_seconds(status: str, created_at: str, updated_at: str) -> int | No
     return max(0, round((end - start).total_seconds()))
 
 
-def _step_plugins_by_name(config_path: str) -> dict[str, str]:
-    """Maps step_name -> plugin from the chain's own YAML config, reloaded fresh
-    (ADR-010, AT-05) — same technique already used by `_resolve_active_claude_step`
-    (ADR-005) to decide whether a step is streamable. Returns {} (never raises) if
-    the config can't be reloaded, so a missing/invalid file degrades to `plugin:
-    null` per step instead of failing the whole run-detail response.
-    """
-    try:
-        chain = YamlJsonChainLoader().load(config_path)
-    except ChainValidationError:
-        return {}
-    return {step.name: step.plugin for step in chain.steps}
-
-
 def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict | None:
     db_file = watch_dir / f"{chain_name}.db"
     if not db_file.exists():
@@ -333,17 +330,35 @@ def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict |
     if run_row is None:
         return None
     run_id, status, created_at, updated_at, config_path, archived_at = run_row
-    plugins_by_step = _step_plugins_by_name(config_path)
 
-    columns = "step_name, status, attempt_count, started_at, finished_at, error_message"
+    # Loaded once (ADR-010, AT-05), reused below both for `plugin` per step and
+    # for resolving `awaiting_input`'s workspace_path (ADR-013) — previously two
+    # separate reloads of the same YAML (plus a redundant workflow_runs/
+    # step_executions round trip via `_resolve_active_claude_step`) on every
+    # request against a running chain; a missing/invalid config degrades `chain`
+    # to None (so `plugin`/`awaiting_input` degrade gracefully too) instead of
+    # failing the whole response.
+    try:
+        chain = YamlJsonChainLoader().load(config_path)
+    except ChainValidationError:
+        chain = None
+    plugins_by_step = {s.name: s.plugin for s in chain.steps} if chain is not None else {}
+
+    # `input` is always selected (not just under `include_io`) — needed
+    # internally to resolve the running step's workspace_path for
+    # `awaiting_input`; only ever surfaced in the response when `include_io` is
+    # set, exactly as before.
+    columns = "step_name, status, attempt_count, started_at, finished_at, error_message, input"
     if include_io:
-        columns += ", input, output"
+        columns += ", output"
     step_rows = _query_all(
         db_file,
         f"SELECT {columns} FROM step_executions WHERE run_id = ? ORDER BY started_at",
         (run_id,),
     )
     steps = []
+    running_step_name: str | None = None
+    running_step_input: str | None = None
     for r in step_rows:
         step = {
             "step_name": r[0],
@@ -354,10 +369,18 @@ def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict |
             "error_message": r[5],
             "plugin": plugins_by_step.get(r[0]),
         }
+        if r[1] == "running":
+            running_step_name, running_step_input = r[0], r[6]
         if include_io:
             step["input"] = json.loads(r[6]) if r[6] else None
             step["output"] = json.loads(r[7]) if r[7] else None
         steps.append(step)
+
+    awaiting_input = False
+    if status == "running" and chain is not None and running_step_name is not None:
+        workspace_path = _claude_step_workspace_path(chain, running_step_name, running_step_input)
+        if workspace_path:
+            awaiting_input = _pergunta_path(workspace_path, run_id, running_step_name).exists()
 
     return {
         "chain_name": chain_name,
@@ -368,6 +391,7 @@ def get_run_detail(watch_dir: Path, chain_name: str, include_io: bool) -> dict |
         "duration_seconds": _duration_seconds(status, created_at, updated_at),
         "steps": steps,
         "archived": bool(archived_at),
+        "awaiting_input": awaiting_input,
     }
 
 
@@ -396,6 +420,62 @@ def _session_log_path(workspace_path: str, run_id: str, step_name: str) -> Path:
 
 def _instructions_path(workspace_path: str, run_id: str, step_name: str) -> Path:
     return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.instrucoes.jsonl"
+
+
+def _resposta_path(workspace_path: str, run_id: str, step_name: str) -> Path:
+    # Sibling of _instructions_path, but a distinct channel: /instrucoes pushes a
+    # new stdin message into the live process (steers an ongoing turn);
+    # /resposta unblocks a specific pending `ask_user` MCP tool call
+    # (mcp_servers/ask_user_server.py polls this exact path). Same deterministic
+    # convention as session_log_path/instructions_path (ADR-002/ADR-005).
+    return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.resposta.json"
+
+
+def _pergunta_path(workspace_path: str, run_id: str, step_name: str) -> Path:
+    # Written by mcp_servers/ask_user_server.py for the duration of one pending
+    # `ask_user` call, deleted the moment it's answered or times out — its mere
+    # existence *is* "awaiting_input" for that step. Duplicated here rather than
+    # imported from the plugin, same rule as every other deterministic path in
+    # this module (adapters/ never depends on plugins/).
+    return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.pergunta.json"
+
+
+def _is_awaiting_input(watch_dir: Path, chain_name: str) -> bool:
+    """True only while a running `claude_code_runner` step (any modo) has a
+    pending `ask_user` question published (ADR-013) — reuses
+    `_resolve_active_claude_step` exactly like `/stream`/`/instrucoes` do, so it
+    costs a fresh YAML reload only for chains that are actually `running`
+    (skipped entirely for terminal ones by both callers below).
+    """
+    resolved = _resolve_active_claude_step(watch_dir, chain_name)
+    if resolved is None:
+        return False
+    workspace_path, run_id, step_name = resolved
+    return _pergunta_path(workspace_path, run_id, step_name).exists()
+
+
+def _claude_step_workspace_path(chain, step_name: str, input_json: str | None) -> str | None:
+    """Given an already-loaded chain and a step's persisted `input` JSON,
+    resolves workspace_path for a `claude_code_runner` step — carry-forward
+    `input` first, falling back to the step's own `params` (ADR-007: the
+    `investigar`/`coding_local*` modos have no preceding workspace_setup step,
+    so there is no carry-forward input in that case — same fallback order as
+    claude_code_runner.py itself). Returns None if the step isn't a
+    `claude_code_runner` step, or no workspace_path is resolvable either way.
+
+    Factored out of `_resolve_active_claude_step` so `get_run_detail` can reuse
+    it against a chain/step row it already has in hand, instead of reloading
+    the same YAML and re-querying the same tables a second time per request
+    (ADR-013 code review finding).
+    """
+    step_def = next((s for s in chain.steps if s.name == step_name), None)
+    if step_def is None or step_def.plugin != "claude_code_runner":
+        return None
+    input_data = json.loads(input_json) if input_json else {}
+    workspace_path = input_data.get("workspace_path") if isinstance(input_data, dict) else None
+    if not workspace_path:
+        workspace_path = step_def.params.get("workspace_path")
+    return workspace_path or None
 
 
 def _resolve_active_claude_step(watch_dir: Path, chain_name: str) -> tuple[str, str, str] | None:
@@ -432,18 +512,7 @@ def _resolve_active_claude_step(watch_dir: Path, chain_name: str) -> tuple[str, 
         chain = YamlJsonChainLoader().load(config_path)
     except ChainValidationError:
         return None
-    step_def = next((s for s in chain.steps if s.name == step_name), None)
-    if step_def is None or step_def.plugin != "claude_code_runner":
-        return None
-
-    input_data = json.loads(input_json) if input_json else {}
-    workspace_path = input_data.get("workspace_path") if isinstance(input_data, dict) else None
-    if not workspace_path:
-        # ADR-007: the `investigar` modo has no preceding workspace_setup step, so
-        # there is no carry-forward input — workspace_path lives in the step's own
-        # params instead (same fallback order as claude_code_runner.py itself).
-        # Found running the investigar modo for real against a live SSE stream.
-        workspace_path = step_def.params.get("workspace_path")
+    workspace_path = _claude_step_workspace_path(chain, step_name, input_json)
     if not workspace_path:
         return None
     return workspace_path, run_id, step_name
@@ -632,6 +701,27 @@ def build_app(
         instructions_path.parent.mkdir(parents=True, exist_ok=True)
         with open(instructions_path, "a", encoding="utf-8") as f:
             f.write(body.mensagem + "\n")
+        return {"chain_name": chain_name, "status": "accepted"}
+
+    @app.post("/runs/{chain_name}/resposta", status_code=202)
+    def post_answer(chain_name: str, body: AnswerRequest) -> dict:
+        resolved = _resolve_active_claude_step(state.watch_dir, chain_name)
+        if resolved is None:
+            raise HTTPException(
+                409,
+                detail=_error(
+                    "not_interactable",
+                    f"no active claude_code_runner step for '{chain_name}'",
+                ),
+            )
+        workspace_path, run_id, step_name = resolved
+        resposta_path = _resposta_path(workspace_path, run_id, step_name)
+        resposta_path.parent.mkdir(parents=True, exist_ok=True)
+        # Overwrite, not append: at most one question is pending per step at a
+        # time (ask_user_server.py blocks on the tool call, so a second question
+        # can't be asked until the first one is answered) — same convention as
+        # ask_user_server.py's own read-then-delete of this file.
+        resposta_path.write_text(body.resposta, encoding="utf-8")
         return {"chain_name": chain_name, "status": "accepted"}
 
     @app.post("/runs/{chain_name}/cancelar")

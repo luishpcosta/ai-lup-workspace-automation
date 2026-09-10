@@ -2,9 +2,16 @@
 
 Invokes the `claude` CLI as a **long-lived process** (`Popen`, stdin/stdout kept
 open) using `--input-format stream-json --output-format stream-json --verbose`,
-parametrized by `params.modo` (`"coding"`, `"review"` or `"investigar"`). This replaced the
-ADR-002 one-shot `subprocess.run(capture_output=True)` invocation — the plugin's
+parametrized by `params.modo` (`"coding"`, `"review"`, `"investigar"`,
+`"coding_local"` or `"coding_local_interativo"`). This replaced the ADR-002
+one-shot `subprocess.run(capture_output=True)` invocation — the plugin's
 external contract (`params`/`output`, `TransientError` semantics) is unchanged.
+
+`coding_local_interativo` is `coding_local` (ADR-008) plus a real pause/resume
+mechanism: the agent gets an extra `ask_user` MCP tool (`_build_interactive_mcp_config`,
+`mcp_servers/ask_user_server.py`) it can call to block on a genuine human answer
+mid-session — the `instructions_path` file below is fire-and-forget steering, not
+a guaranteed pause, which is why this uses a tool call instead.
 
 Everything below is verified against a real, live `claude` invocation this
 session (`claude 2.1.260`), not assumed — see `adr/ADR-005-stream-interacao-agente.md`:
@@ -51,6 +58,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -125,6 +133,8 @@ class ClaudeCodeRunnerPlugin(Plugin):
             return self._run_investigar(context)
         if modo == "coding_local":
             return self._run_coding_local(context)
+        if modo == "coding_local_interativo":
+            return self._run_coding_local_interativo(context)
         raise ValueError(f"claude_code_runner: invalid modo {modo!r}")
 
     # -- modo coding (ADR-002-AT-02, AC-04/AC-05) ---------------------------
@@ -337,6 +347,71 @@ class ClaudeCodeRunnerPlugin(Plugin):
             "'branch' (nome exato da branch para a qual você deu push)."
         )
 
+    # -- modo coding_local_interativo (Q&A em tempo real via tool MCP ask_user) --
+
+    def _run_coding_local_interativo(self, context: PluginContext) -> dict:
+        """Same as `coding_local` (ADR-008) — local checkout already existing,
+        no workspace_setup, agent follows the target repo's own Git flow and
+        never opens the PR itself — except the agent additionally has an
+        `ask_user` MCP tool available (`_build_interactive_mcp_config`) to pause
+        and ask the human operator a question mid-session, via a call that
+        genuinely blocks (tool-use protocol, not a prompt convention). The pause
+        itself lives entirely inside the `ask_user` MCP server process
+        (`mcp_servers/ask_user_server.py`), invisible to this plugin's own read
+        loop, which keeps blocking on `proc.stdout` exactly as it already does
+        for any other tool call — the one thing this modo does pass down to
+        `_run_streaming_session` is `pergunta_path`, so `_poll_instructions`
+        holds off forwarding a stray `/instrucoes` line into stdin while that
+        tool call is outstanding (ADR-013).
+        """
+        params = context.params
+        input_data = context.input if isinstance(context.input, dict) else {}
+        workdir = input_data.get("workspace_path") or params.get("workspace_path")
+        if not workdir:
+            raise ValueError(
+                "claude_code_runner (coding_local_interativo): no workspace_path in "
+                "context.input or context.params"
+            )
+        prompt_text = params["prompt"]
+        docs_referenced = params.get("docs_referenced") or []
+        mcp_config_path = params["mcp_config_path"]
+
+        log_path = self._session_log_path(workdir, context.run_id, context.step_name)
+        instructions_path = self._instructions_path(workdir, context.run_id, context.step_name)
+        pergunta_path = self._pergunta_path(workdir, context.run_id, context.step_name)
+        interactive_mcp_config_path = self._build_interactive_mcp_config(
+            mcp_config_path, workdir, context.run_id, context.step_name
+        )
+        cmd = self._build_cmd(interactive_mcp_config_path, _CODING_LOCAL_SCHEMA)
+        prompt = self._coding_local_interativo_prompt(prompt_text, docs_referenced)
+
+        returncode, lines = self._run_streaming_session(
+            cmd, workdir, log_path, instructions_path, prompt, pergunta_path=pergunta_path
+        )
+        self._raise_if_failed(returncode, lines, log_path)
+        result = self._extract_structured(self._find_result_event(lines), log_path)
+
+        return {
+            "status": "success",
+            "summary": result.get("summary", ""),
+            "docs_referenced": result.get("docs_referenced", []),
+            "branch": result.get("branch", ""),
+            "workspace_path": str(workdir),
+            "session_log_path": str(log_path),
+        }
+
+    def _coding_local_interativo_prompt(self, prompt_text: str, docs_referenced: list) -> str:
+        base = self._coding_local_prompt(prompt_text, docs_referenced)
+        return (
+            f"{base} Você tem disponível a tool 'ask_user': use-a sempre que "
+            "precisar de uma decisão ou esclarecimento que não pode inferir com "
+            "segurança sozinho (ex.: instrução ambígua, escolha entre abordagens "
+            "de implementação, confirmação antes de algo difícil de reverter) — "
+            "ela pausa a execução e espera uma resposta real do usuário pelo "
+            "painel; não invente uma resposta no lugar de perguntar quando "
+            "houver ambiguidade real."
+        )
+
     # -- shared plumbing -------------------------------------------------
 
     def _build_cmd(self, mcp_config_path: str, schema: dict) -> list[str]:
@@ -371,20 +446,102 @@ class ClaudeCodeRunnerPlugin(Plugin):
             "bypassPermissions",
         ]
 
+    def _build_interactive_mcp_config(
+        self, mcp_config_path: str, workspace_path: Any, run_id: str, step_name: str
+    ) -> str:
+        """Merges the static, motor-supplied MCP config (e.g. docs-mcp-proxy —
+        `mcp_config_path`, resolved against this process's own cwd exactly like
+        `_build_cmd` does for the non-interactive modes) with a per-run `ask-user`
+        server entry, and writes the result to a deterministic path alongside
+        session_log_path/instructions_path. The merged file — not the static one
+        — is what `_build_cmd` receives as `mcp_config_path` for this modo.
+
+        `ask-user`'s `command` is `sys.executable` (this process's own
+        interpreter, guaranteed to have the `mcp` package installed) invoking
+        `mcp_servers/ask_user_server.py` by absolute path — same "never leave a
+        motor-relative path to be resolved against workspace_path" rule as the
+        static config above (the `claude` subprocess runs with
+        cwd=workspace_path, not the motor's). WORKSPACE_PATH/RUN_ID/STEP_NAME are
+        passed as env so that server process knows which step's
+        pergunta/resposta files (http_api.py, ADR-005-style convention) belong to
+        it, without any in-memory state shared with this plugin.
+        """
+        resolved_static_path = Path(mcp_config_path).resolve()
+        merged: dict = {"mcpServers": {}}
+        if resolved_static_path.exists():
+            raw = resolved_static_path.read_text(encoding="utf-8")
+            try:
+                loaded = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "claude_code_runner (coding_local_interativo): mcp_config_path "
+                    f"{resolved_static_path} is not valid JSON: {exc}"
+                ) from exc
+            if not isinstance(loaded, dict):
+                raise ValueError(
+                    "claude_code_runner (coding_local_interativo): mcp_config_path "
+                    f"{resolved_static_path} must be a JSON object with a top-level "
+                    f"'mcpServers' key, got {type(loaded).__name__}"
+                )
+            merged = loaded
+            merged.setdefault("mcpServers", {})
+
+        ask_user_server_path = (
+            Path(__file__).resolve().parent.parent / "mcp_servers" / "ask_user_server.py"
+        )
+        merged["mcpServers"]["ask-user"] = {
+            "command": sys.executable,
+            "args": [str(ask_user_server_path)],
+            "env": {
+                "WORKSPACE_PATH": str(workspace_path),
+                "RUN_ID": run_id,
+                "STEP_NAME": step_name,
+            },
+        }
+
+        merged_path = self._session_log_path(workspace_path, run_id, step_name).with_name(
+            f"{step_name}.mcp-config.json"
+        )
+        merged_path.parent.mkdir(parents=True, exist_ok=True)
+        merged_path.write_text(json.dumps(merged), encoding="utf-8")
+        return str(merged_path)
+
     def _session_log_path(self, workspace_path: Any, run_id: str, step_name: str) -> Path:
         return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.log"
 
     def _instructions_path(self, workspace_path: Any, run_id: str, step_name: str) -> Path:
         return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.instrucoes.jsonl"
 
+    def _pergunta_path(self, workspace_path: Any, run_id: str, step_name: str) -> Path:
+        # Same file mcp_servers/ask_user_server.py writes while an `ask_user`
+        # tool call is pending (and http_api.py reads for `awaiting_input`,
+        # ADR-013) — duplicated here, not imported, same rule as every other
+        # deterministic path already duplicated between this plugin and
+        # adapters/http_api.py.
+        return Path(workspace_path) / ".workflow-logs" / run_id / f"{step_name}.pergunta.json"
+
     def _run_streaming_session(
-        self, cmd: list[str], cwd: Any, log_path: Path, instructions_path: Path, prompt: str
+        self,
+        cmd: list[str],
+        cwd: Any,
+        log_path: Path,
+        instructions_path: Path,
+        prompt: str,
+        pergunta_path: Path | None = None,
     ) -> tuple[int, list[str]]:
         """Runs the CLI as a long-lived process, writing session_log_path
         incrementally (AC-02) and forwarding new instructions-file lines to its
         stdin while active (AC-04). Closes stdin as soon as the current turn's
         `result` event arrives — a stream-json session otherwise waits
         indefinitely for more input (verified live).
+
+        `pergunta_path`, when given (only `coding_local_interativo`, ADR-013),
+        marks a window where an `ask_user` MCP tool call is genuinely blocking
+        the agent — `_poll_instructions` holds any new instruction unconsumed
+        during that window rather than writing to stdin, since injecting a user
+        message while a tool_use has no tool_result yet is unverified CLI
+        behavior (unlike steering an ordinary turn, ADR-005, which *was*
+        verified live).
         """
         log_path.parent.mkdir(parents=True, exist_ok=True)
         # encoding="utf-8" is required, not cosmetic: `claude` always emits/reads
@@ -406,7 +563,7 @@ class ClaudeCodeRunnerPlugin(Plugin):
         stop_polling = threading.Event()
         poller = threading.Thread(
             target=self._poll_instructions,
-            args=(proc, instructions_path, stop_polling),
+            args=(proc, instructions_path, stop_polling, pergunta_path),
             daemon=True,
         )
         poller.start()
@@ -450,12 +607,22 @@ class ClaudeCodeRunnerPlugin(Plugin):
             return False
 
     def _poll_instructions(
-        self, proc: Any, instructions_path: Path, stop_event: threading.Event
+        self,
+        proc: Any,
+        instructions_path: Path,
+        stop_event: threading.Event,
+        pergunta_path: Path | None = None,
     ) -> None:
         last_size = 0
         while not stop_event.is_set():
             if stop_event.wait(self._instruction_poll_interval):
                 return
+            if pergunta_path is not None and pergunta_path.exists():
+                # An `ask_user` call is blocking the agent right now (ADR-013) —
+                # hold any new instruction unconsumed (don't advance last_size)
+                # instead of writing to stdin mid-pending-tool-call; picked up on
+                # a later poll once the question resolves and the file is gone.
+                continue
             if not instructions_path.exists():
                 continue
             try:

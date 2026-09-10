@@ -188,7 +188,8 @@ export default function RunsList({ onSelect, refreshToken }) {
                   <tr
                     key={run.chain_name}
                     data-status={run.status}
-                    className={`row-clickable${run.status === 'failed' ? ' run-row-failed' : ''}`}
+                    data-awaiting-input={run.awaiting_input || undefined}
+                    className={`row-clickable${run.status === 'failed' ? ' run-row-failed' : ''}${run.awaiting_input ? ' run-row-awaiting' : ''}`}
                     tabIndex={0}
                     onClick={() => onSelect(run.chain_name)}
                     onKeyDown={(event) => {
@@ -209,6 +210,15 @@ export default function RunsList({ onSelect, refreshToken }) {
                         <span className="status__dot" aria-hidden="true" />
                         {status.label}
                       </span>
+                      {/* ADR-013: o agente pausou numa pergunta (ask_user) — sinal
+                          visível na listagem, sem precisar entrar na execução para
+                          notar (GET /runs traz `awaiting_input` derivado do arquivo
+                          .pergunta.json enquanto a run está `running`). */}
+                      {run.awaiting_input && (
+                        <span className="run-awaiting-badge" title="O agente está esperando uma resposta">
+                          ❓ Aguardando resposta
+                        </span>
+                      )}
                     </td>
                     <td className="col-duration">{formatDuration(run.duration_seconds)}</td>
                     <td className="col-time" title={formatAbsoluteTime(run.updated_at)}>
