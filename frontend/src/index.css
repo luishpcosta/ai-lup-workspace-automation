@@ -89,10 +89,16 @@ body {
     color 160ms ease-out;
 }
 
+/* Largura relativa, não um número fixo escolhido a dedo: `96vw` acompanha a
+   tela em qualquer resolução (sem "pular" de 100% pra um valor fixo num
+   breakpoint); o teto em `rem` (não `px`) escala junto com o tamanho de fonte/
+   zoom do usuário em vez de travar num pixel absoluto — existe só pra
+   tabela/JSON/log não virarem uma única linha absurdamente comprida em
+   monitores ultra-wide. Padding lateral também em `clamp()`/`rem`, mesma lógica. */
 #root {
-  max-width: 1180px;
+  width: min(96vw, 112.5rem); /* 112.5rem ≈ 1800px no root font-size padrão */
   margin: 0 auto;
-  padding: 24px 24px 64px;
+  padding: 1.5rem clamp(1rem, 3vw, 4rem) 4rem;
 }
 
 .visually-hidden {
@@ -814,6 +820,36 @@ tr.run-row-failed.row-clickable:hover {
   background: var(--warn-soft);
 }
 
+/* ADR-013: destaque passivo (mesmo padrão de run-row-failed) para uma run com
+   pergunta pendente (ask_user, modo coding_local_interativo) — sinaliza na
+   listagem principal, sem precisar abrir o detalhe para notar. */
+tr.run-row-awaiting {
+  background: var(--accent-soft);
+}
+
+tr.run-row-awaiting td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+tr.run-row-awaiting.row-clickable:hover {
+  background: var(--accent-soft);
+  filter: brightness(0.97);
+}
+
+.run-awaiting-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
 /* ---------- Estados (carregando / vazio / erro) ---------- */
 
 .state-block {
@@ -999,6 +1035,22 @@ tr[data-status='failed'] .col-error {
   gap: 14px;
 }
 
+/* ---------- Pergunta pendente (ask_user, coding_local_interativo) ---------- */
+
+.stream__question-text {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.stream__question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ---------- Leitura formatada do stream (ADR-010) ---------- */
 
 .stream-turns {
@@ -1054,8 +1106,8 @@ tr[data-status='failed'] .col-error {
 
 .stream-tool__summary {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;
@@ -1066,6 +1118,12 @@ tr[data-status='failed'] .col-error {
   display: none;
 }
 
+.stream-tool__summary-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .stream-tool__name {
   font-weight: 600;
   font-family: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', monospace;
@@ -1074,6 +1132,18 @@ tr[data-status='failed'] .col-error {
 .stream-tool__status {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* Resumo legível (description/command/query/... do input) — visível já com o
+   card fechado, uma linha só, truncado com reticências; texto completo
+   continua disponível em "Entrada" ao abrir o card. */
+.stream-tool__desc {
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stream-tool[data-status='failed'] .stream-tool__status {

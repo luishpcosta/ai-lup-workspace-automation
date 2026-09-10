@@ -155,3 +155,37 @@ describe('RunsList — tempo de execução (ADR-012-AC-06)', () => {
     expect(screen.getByText('—')).toBeInTheDocument()
   })
 })
+
+describe('RunsList — pergunta pendente na listagem principal (ADR-013)', () => {
+  it('highlights a run whose agent is waiting for an answer, passively, like a failed run', async () => {
+    vi.spyOn(apiClient, 'getRuns').mockResolvedValue([
+      {
+        chain_name: 'hist-005',
+        workflow_name: 'w',
+        status: 'running',
+        updated_at: 't1',
+        awaiting_input: true,
+      },
+    ])
+    render(<RunsList onSelect={() => {}} />)
+    const row = (await screen.findByText('hist-005')).closest('tr')
+    expect(row).toHaveClass('run-row-awaiting')
+    expect(screen.getByText(/Aguardando resposta/)).toBeInTheDocument()
+  })
+
+  it('shows no badge for a running run that is not awaiting input', async () => {
+    vi.spyOn(apiClient, 'getRuns').mockResolvedValue([
+      {
+        chain_name: 'hist-005',
+        workflow_name: 'w',
+        status: 'running',
+        updated_at: 't1',
+        awaiting_input: false,
+      },
+    ])
+    render(<RunsList onSelect={() => {}} />)
+    const row = (await screen.findByText('hist-005')).closest('tr')
+    expect(row).not.toHaveClass('run-row-awaiting')
+    expect(screen.queryByText(/Aguardando resposta/)).not.toBeInTheDocument()
+  })
+})

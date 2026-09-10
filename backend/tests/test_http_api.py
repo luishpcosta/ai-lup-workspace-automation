@@ -211,7 +211,7 @@ def test_get_run_detail_includes_plugin_per_step_adr010_ac08(tmp_path):
     detail = client.get("/runs/wf-plugin").json()
     assert detail["steps"][0]["plugin"] == "echo"
     # campos existentes antes desta feature continuam presentes e no mesmo formato
-    # (`archived` é aditivo, ADR-011).
+    # (`archived` é aditivo, ADR-011; `awaiting_input` é aditivo, ADR-013).
     assert set(detail) == {
         "chain_name",
         "run_id",
@@ -221,6 +221,7 @@ def test_get_run_detail_includes_plugin_per_step_adr010_ac08(tmp_path):
         "duration_seconds",
         "steps",
         "archived",
+        "awaiting_input",
     }
     assert set(detail["steps"][0]) >= {
         "step_name",
@@ -598,7 +599,8 @@ def test_get_run_detail_includes_archived_field_adr011_ac07(tmp_path):
 
     before = client.get("/runs/wf-detail-archived").json()
     assert before["archived"] is False
-    # campos existentes antes desta feature continuam presentes.
+    # campos existentes antes desta feature continuam presentes
+    # (`awaiting_input` é aditivo, ADR-013).
     assert set(before) == {
         "chain_name",
         "run_id",
@@ -608,6 +610,7 @@ def test_get_run_detail_includes_archived_field_adr011_ac07(tmp_path):
         "duration_seconds",
         "steps",
         "archived",
+        "awaiting_input",
     }
 
     client.post("/runs/wf-detail-archived/arquivar")

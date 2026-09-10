@@ -18,13 +18,48 @@ const PLATFORM_LABELS = { claude_code_runner: 'Claude Code' }
 
 const TOOL_STATUS_LABEL = { running: 'executando', done: 'concluído', failed: 'falhou' }
 
+// Resumo curto e legível do que a tool está fazendo, visível mesmo com o card
+// fechado — sem isso, qualquer tool diferente de ask_user só mostrava o nome cru
+// (ex.: "Bash"), exigindo abrir o <details> pra entender o que de fato rodou.
+// Prioriza campos já pensados para leitura humana (`description`, que é
+// exatamente o que a própria tool Bash do Claude Code preenche) antes de cair
+// para um campo mais técnico (`command`/`query`/...); no fim, qualquer string
+// presente no input serve de resumo — nunca deixa o card sem nada além do nome.
+const DESCRIPTION_FIELD_PRIORITY = [
+  'description',
+  'command',
+  'query',
+  'pattern',
+  'prompt',
+  'question',
+  'file_path',
+  'path',
+  'url',
+]
+
+function describeToolInput(input) {
+  if (!input || typeof input !== 'object') return null
+  for (const key of DESCRIPTION_FIELD_PRIORITY) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  for (const value of Object.values(input)) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
 function ToolTurn({ turn }) {
+  const description = describeToolInput(turn.input)
   return (
     <details className="stream-tool" data-status={turn.status}>
       <summary className="stream-tool__summary">
-        <span className={`status__dot status__dot--${turn.status === 'done' ? 'completed' : turn.status === 'failed' ? 'failed' : 'running'}`} aria-hidden="true" />
-        <span className="stream-tool__name">{turn.name}</span>
-        <span className="stream-tool__status">{TOOL_STATUS_LABEL[turn.status] ?? turn.status}</span>
+        <span className="stream-tool__summary-line">
+          <span className={`status__dot status__dot--${turn.status === 'done' ? 'completed' : turn.status === 'failed' ? 'failed' : 'running'}`} aria-hidden="true" />
+          <span className="stream-tool__name">{turn.name}</span>
+          <span className="stream-tool__status">{TOOL_STATUS_LABEL[turn.status] ?? turn.status}</span>
+        </span>
+        {description && <span className="stream-tool__desc">{description}</span>}
       </summary>
       <div className="stream-tool__detail">
         {turn.input !== undefined && (
@@ -79,7 +114,35 @@ function FormattedTurns({ turns }) {
   )
 }
 
-export default function StreamPanel({ chainName, plugin, onRefresh }) {
+// Turno de tool ask_user (mcp_servers/ask_user_server.py, modo
+// coding_local_interativo) ainda 'running' == pergunta pendente sem tool_result
+// ainda: a chamada bloqueia de verdade o agente (protocolo de tool-use), então só
+// existe uma pendente por vez. Reaproveita o turno 'tool' genérico já parseado por
+// claudeStream.js — sem 'kind' novo — só extrai o que InstructionBox precisa para
+// virar o formulário de resposta.
+//
+// O `claude` CLI reporta tools MCP com o nome namespaced
+// `mcp__<server>__<tool>` (verificado ao vivo: `mcp__ask-user__ask_user`, não o
+// `ask_user` puro que o próprio servidor declara) — casar só o nome puro fazia
+// a pergunta nunca ser reconhecida, caindo sempre no card genérico de tool (JSON
+// cru, sem formulário de resposta). `endsWith('__ask_user')` cobre o nome
+// namespaced com qualquer chave de server; `=== 'ask_user'` cobre um SDK/versão
+// futura que não namespace.
+function isAskUserTool(name) {
+  return name === 'ask_user' || (typeof name === 'string' && name.endsWith('__ask_user'))
+}
+
+function findPendingQuestion(turns) {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i]
+    if (turn.kind === 'tool' && isAskUserTool(turn.name) && turn.status === 'running') {
+      return { text: turn.input?.question ?? '', options: turn.input?.options ?? [] }
+    }
+  }
+  return null
+}
+
+export default function StreamPanel({ chainName, plugin, onRefresh, onPendingQuestion }) {
   const [lines, setLines] = useState([])
   const [status, setStatus] = useState('loading') // 'loading' | 'streaming' | 'inactive' | 'error'
   const [errorMessage, setErrorMessage] = useState(null)
@@ -114,6 +177,22 @@ export default function StreamPanel({ chainName, plugin, onRefresh }) {
 
   const turns = useMemo(() => (formatter ? formatter(lines) : []), [formatter, lines])
   const showFormatted = Boolean(formatter) && !rawMode
+
+  const pendingQuestion = useMemo(() => findPendingQuestion(turns), [turns])
+  useEffect(() => {
+    onPendingQuestion?.(pendingQuestion)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQuestion])
+  useEffect(
+    () => () => {
+      // Sem pergunta pendente ao desmontar (troca de execução — RunDetail
+      // remonta este componente via `key`): evita que o InstructionBox fique
+      // travado no modo "respondendo" de uma sessão antiga.
+      onPendingQuestion?.(null)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
 
   return (
     <section className="panel stream" aria-label="Stream ao vivo">

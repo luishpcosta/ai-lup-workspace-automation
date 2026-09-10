@@ -97,6 +97,17 @@ export function postInstruction(chainName, mensagem) {
   })
 }
 
+// Canal separado de postInstruction: responde a uma pergunta específica feita
+// pelo agente via tool ask_user (modo coding_local_interativo), que pausa de
+// verdade a execução esperando por esta resposta — postInstruction só empurra
+// uma mensagem nova para o meio de um turno em andamento, sem garantia de pausa.
+export function postAnswer(chainName, resposta) {
+  return request(`/runs/${encodeURIComponent(chainName)}/resposta`, {
+    method: 'POST',
+    body: JSON.stringify({ resposta }),
+  })
+}
+
 export function cancelRun(chainName) {
   return request(`/runs/${encodeURIComponent(chainName)}/cancelar`, { method: 'POST' })
 }

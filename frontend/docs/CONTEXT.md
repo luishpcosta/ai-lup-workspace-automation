@@ -66,3 +66,16 @@ Objeto `{template_id: string, params: dict}` — `params` é montado por
 `DynamicParamsForm.jsx` a partir dos valores preenchidos/selecionados pelo usuário,
 com as chaves exatas que `template.params_schema` declara. Quem valida campos
 obrigatórios faltando é o backend (`validate_params` → 400 `invalid_params`).
+
+**Pergunta pendente** (ADR-013):
+Estado derivado por `StreamPanel.jsx` do próprio stream ao vivo — um turno de tool
+`ask_user` (motor-workflow, modo `coding_local_interativo`) ainda sem `tool_result`.
+Repassado a `RunDetail.jsx` via `onPendingQuestion`, que por sua vez o passa a
+`InstructionBox.jsx`: sem pergunta pendente, o formulário de instrução livre de
+sempre; com ela, um formulário de resposta (texto livre ou um botão por opção),
+enviado por `postAnswer` (`POST /runs/{chain_name}/resposta`) — canal diferente de
+`postInstruction`. `RunsList.jsx` mostra o mesmo sinal, de forma independente, a
+partir do campo `awaiting_input` de `GET /runs` (motor-workflow, ADR-013),
+já que a listagem principal não tem um stream aberto por execução.
+_Evitar_: "instrução"/"instrucoes" para este conceito — é um canal deliberadamente
+separado (ver `motor-workflow` CONTEXT.md).
